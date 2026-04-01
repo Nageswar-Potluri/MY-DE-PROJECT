@@ -1,4 +1,4 @@
-# Racing Data Engineering Pipeline 🚀
+# Racing Data Engineering Pipeline
 
 ## Overview
 End-to-end data pipeline using:
