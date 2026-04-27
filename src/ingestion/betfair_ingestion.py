@@ -179,7 +179,7 @@ if __name__ == "__main__":
     logger.info(f"Total markets received: {len(market_catalogue)}")
 
     for market in market_catalogue[:3]:
-        print(market)
+        print(market) # test commit
 
     # -------- Extract market IDs --------
     market_ids = [m["marketId"] for m in market_catalogue]
