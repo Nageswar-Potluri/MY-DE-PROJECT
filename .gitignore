@@ -3,3 +3,10 @@
 *.ENV
 .venv/
 __pycache__/
+.idea/
+*.iml
+*.csv
+__pycache__/
+.venv/
+*.env
+*.ENV
