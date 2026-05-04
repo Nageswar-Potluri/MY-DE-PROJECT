@@ -1,0 +1,26 @@
+{
+    "jupyter.interactiveWindow.cellMarker.codeRegex": "^# COMMAND ----------|^# Databricks notebook source|^(#\\s*%%|#\\s*\\<codecell\\>|#\\s*In\\[\\d*?\\]|#\\s*In\\[ \\])",
+    "jupyter.interactiveWindow.cellMarker.default": "# COMMAND ----------",
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "askForPassword": true,
+            "driver": "PostgreSQL",
+            "name": "LocalServer",
+            "database": "Project_Racing",
+            "username": "nageswarchowdarypotluri"
+        },
+        {
+            "connectionMethod": "Hostname and Token",
+            "catalog": "workspace",
+            "previewLimit": 50,
+            "driver": "Databricks",
+            "name": "DATABRICKS_CONNECT",
+            "host": "dbc-980658a9-8434.cloud.databricks.com",
+            "path": "/sql/1.0/warehouses/bc034d630d4fc44b"
+        }
+    ]
+}
