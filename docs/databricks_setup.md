@@ -146,10 +146,10 @@ Creates a new dbt project folder called `racing_dbt` with the standard folder st
 | Prompt | Answer | Why |
 |---|---|---|
 | Which database? | `databricks` (select number) | Our warehouse is Databricks |
-| host | `dbc-2b1dc14c-9aed.cloud.databricks.com` | Server hostname from Connection details |
-| http_path | `/sql/1.0/warehouses/3f3297dd1da19ad2` | HTTP path from Connection details |
+| host | `dbc-------------.cloud.databricks.com` | Server hostname from Connection details |
+| http_path | `/sql/1.0/warehouses/12345------` | HTTP path from Connection details |
 | Desired access token option | `1` (token auth) | Simplest auth method for local dev |
-| token | `dapi...` (your PAT) | Authentication to Databricks |
+| token | `Your_Token` (your PAT) | Authentication to Databricks |
 | Scope | `SQL` | dbt only needs SQL access |
 | Unity Catalog | `1` (use Unity Catalog) | Matches our plan — proper data governance |
 | catalog | `main` | Default Unity Catalog in Free Edition |
@@ -163,22 +163,8 @@ Creates a new dbt project folder called `racing_dbt` with the standard folder st
 **Problem encountered:**
 During `dbt init`, the host and token values were accidentally entered in the wrong fields. The terminal arrow key inputs also corrupted the token field.
 
-**Corrupt profiles.yml (before fix):**
-```yaml
-racing_dbt:
-  outputs:
-    dev:
-      catalog: main
-      host: dapiec680df5751013b478a6a463508ce88c      # ← token value in wrong field
-      http_path: /sql/1.0/warehouses/3f3297dd1da19ad2
-      schema: bronze
-      threads: 1
-      token: "\e[B\e[A\e[ADesired access token option (enter a number): 1"  # ← garbage
-      type: databricks
-  target: dev
-```
 
-**Fixed profiles.yml (after fix):**
+** profiles.yml:**
 ```yaml
 racing_dbt:
   outputs:
@@ -188,7 +174,7 @@ racing_dbt:
       http_path: /sql/1.0/warehouses/3f3297dd1da19ad2
       schema: bronze
       threads: 1
-      token: dapiec680df5751013b478a6a463508ce88c     # ← correct token
+      token: 'Your_Token'     # ← correct token
       type: databricks
   target: dev
 ```
@@ -283,3 +269,7 @@ Complete these Bronze loading tasks first:
 | dbt project | `/Users/nageswarchowdarypotluri/my-de-project/racing_dbt/` |
 | dbt profile | `/Users/nageswarchowdarypotluri/.dbt/profiles.yml` |
 | Python venv | `/Users/nageswarchowdarypotluri/my-de-project/.venv/` |
+
+
+
+can i set it as a reamefile in git or what
