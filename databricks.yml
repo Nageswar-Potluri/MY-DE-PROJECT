@@ -1,0 +1,15 @@
+bundle:
+  name: my-de-project
+
+bundle_root_path: /Workspace/Users/ncpotluri95@gmail.com
+
+workspace:
+  host: https://dbc-980658a9-8434.cloud.databricks.com
+  profile: vscode_nageswar_mac
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      profile: vscode_nageswar_mac
