@@ -219,12 +219,13 @@ class BetfairPipeline:
 
     # -------------------- TOKEN REFRESH --------------------
     # Betfair session tokens expire after ~8 hours.
-    # If any API call returns 400/401/403, it likely means the token has expired.
+    # If any API call returns 401/403, it likely means the token has expired.
     # This method refreshes the token and raises an exception so tenacity
     # retries the original API call with the new token.
     # Called inside every API method before raising the final error.
     def _handle_session_error(self, response: requests.Response):
-        if response.status_code in {400, 401, 403}:
+        # 400 is a payload/market-ID error, not an auth error — must not trigger token refresh
+        if response.status_code in {401, 403}:
             logger.warning(f"Session error ({response.status_code}) — refreshing token and retrying")
             self.token = self._get_session_token()
             raise Exception(f"Token refreshed after {response.status_code} — will retry")
@@ -361,18 +362,17 @@ class BetfairPipeline:
     # Calls Betfair's listMarketBook endpoint for a batch of market IDs.
     # Returns current odds snapshot for each market.
     #
-    # ADDED priceData vs previous version:
-    #   EX_LTP        → last traded price (most recent price a bet was matched at)
-    #   EX_TRADED_VOL → runner-level total volume matched
-    #   SP_PROJECTED  → near/far SP projection prices (available pre-race only)
+    # priceData uses only valid Betfair REST API enum values:
+    #   EX_BEST_OFFERS  → best 3 back/lay prices per runner
+    #   EX_TRADED       → tradedVolume (volume at each price) + lastPriceTraded (LTP) per runner
+    #   SP_TRADED       → final BSP after race settles
+    # NOTE: EX_LTP and EX_TRADED_VOL are NOT valid REST API enum values → cause DSC-0008
     #
-    # WEIGHT WARNING: each priceData option adds weight per market.
-    # With 5 priceData options, weight ≈ 8 per market.
-    # 200 limit ÷ 8 = 25 max markets per request.
-    # Batch size reduced from 10 → 8 to stay well within the limit.
+    # WEIGHT: each priceData option adds ~3 weight points per market.
+    # 3 options × 8 markets = ~72 weight per request — well within the 200 limit.
     #
-    # Pre-race run:  EX_BEST_OFFERS + SP_PROJECTED have data, SP_TRADED is empty
-    # Post-race run: SP_TRADED (BSP) has data, EX_BEST_OFFERS is empty (market closed)
+    # Pre-race run:  EX_BEST_OFFERS populated, SP_TRADED empty (market still open)
+    # Post-race run: SP_TRADED (BSP) populated, EX_BEST_OFFERS empty (market closed)
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(min=2, max=10),
@@ -390,11 +390,12 @@ class BetfairPipeline:
             "marketIds": market_ids,
             "priceProjection": {
                 "priceData": [
-                    "EX_BEST_OFFERS",   # best 3 back and lay prices at each level
-                    "EX_LTP",           # ADDED: last traded price per runner
-                    "EX_TRADED_VOL",    # ADDED: total volume matched per runner
-                    "SP_TRADED",        # final BSP — only available post-race
-                    "SP_PROJECTED",     # ADDED: near/far SP projection — only available pre-race
+                    "EX_BEST_OFFERS",   # best 3 back and lay prices — valid REST API enum
+                    "EX_TRADED",        # traded volume + last traded price — valid REST API enum
+                    "SP_TRADED",        # final BSP post-race — valid REST API enum
+                    # REMOVED: EX_LTP, EX_TRADED_VOL — not valid Betfair PriceData enums → DSC-0008
+                    # REMOVED: SP_PROJECTED, SP_AVAILABLE — also cause DSC-0008 on REST API
+                    # Full valid enum: SP_TRADED, SP_PROJECTED, EX_BEST_OFFERS, EX_ALL_OFFERS, EX_TRADED
                 ],
                 "virtualise": False     # exclude virtual bets from prices
             }
@@ -407,6 +408,8 @@ class BetfairPipeline:
         )
         self._handle_session_error(response)
         if response.status_code != 200:
+            # Log the full response body so we can see Betfair's actual error message
+            logger.error(f"Book API error {response.status_code} — {response.text}")
             raise Exception(f"Book API failed: {response.status_code} — {response.text}")
         return response.json()
 
@@ -525,18 +528,19 @@ class BetfairPipeline:
     # Reads from S3 instead of calling the catalogue API again — avoids an
     # extra API call and uses the exact same market IDs we already stored.
     #
-    # CHANGED: batch_size reduced from 10 → 8 because we now request 5 priceData
-    # options (EX_BEST_OFFERS, EX_LTP, EX_TRADED_VOL, SP_TRADED, SP_PROJECTED).
-    # At ~8 weight points per market, 200 limit ÷ 8 = 25 max — 8 keeps us safe.
-    def run_book(self, today: str, overwrite: bool = False):
-        book_prefix = f"betfair/market_book/extracted_date={today}/"
+    def run_book(self, today: str, overwrite: bool = False, snapshot_type: str = None):
 
-        # Skip if book data already exists for today — same idempotency logic as catalogue.
+        book_prefix = (
+            f"betfair/market_book/extracted_date={today}/snapshot_type={snapshot_type}/"
+            if snapshot_type
+            else f"betfair/market_book/extracted_date={today}/"
+        )
+
         if not overwrite and self._s3_prefix_has_files(book_prefix):
-            logger.info(f"Book already exists for {today} — skipping (use --overwrite to re-run)")
+            logger.info(f"Book already exists for {today} {snapshot_type or ''} — skipping")
             return
 
-        logger.info(f"Starting book run for {today}")
+        logger.info(f"Starting book run for {today} | snapshot_type={snapshot_type or 'None'}")
 
         # List ALL catalogue files under today's partition.
         # Using a paginator handles cases where there are more than 1000 files.
@@ -580,9 +584,6 @@ class BetfairPipeline:
         run_time = datetime.now(self.SYDNEY).strftime("%H-%M")
         success, failed = 0, 0
 
-        # CHANGED: batch_size reduced from 10 → 8 to stay within Betfair's 200 weight limit.
-        # With 5 priceData options requested, each market costs ~8 weight points.
-        # 8 markets × 8 weight = 64 points per request — well within the 200 limit.
         batch_size = 8
 
         for i in range(0, len(market_ids), batch_size):
@@ -596,8 +597,7 @@ class BetfairPipeline:
                 # runners field stays nested (Bronze layer) — flattened later in Databricks.
                 validated = [r for r in (self.validate_book(b) for b in books) if r is not None]
 
-                # S3 path: betfair/market_book/extracted_date=YYYY-MM-DD/run_time=HH-MM/batch_N.json
-                key = f"betfair/market_book/extracted_date={today}/run_time={run_time}/batch_{batch_num}.json"
+                key = f"{book_prefix}run_time={run_time}/batch_{batch_num}.json"
                 self.upload_batch(validated, key)
                 success += len(validated)
             except Exception as e:
@@ -613,18 +613,17 @@ class BetfairPipeline:
     # all        → both in sequence — only runs book if catalogue uploaded data
     # Wraps everything in try/except so any unhandled crash triggers an SNS alert
     # and re-raises the error so cron records a non-zero exit code (job failed).
-    def run(self, mode: str, from_utc: str, to_utc: str, today: str, overwrite: bool = False):
+
+    def run(self, mode: str, from_utc: str, to_utc: str, today: str, overwrite: bool = False, snapshot_type: str = None):
         try:
             if mode == "catalogue":
                 self.run_catalogue(from_utc, to_utc, today, overwrite)
             elif mode == "book":
-                self.run_book(today, overwrite)
+                self.run_book(today, overwrite, snapshot_type)
             elif mode == "all":
-                # Only proceed to book if catalogue actually uploaded data.
-                # If 0 markets were found (e.g. ran at wrong time), skip book run.
                 uploaded = self.run_catalogue(from_utc, to_utc, today, overwrite)
                 if uploaded:
-                    self.run_book(today, overwrite)
+                    self.run_book(today, overwrite, snapshot_type)
                 else:
                     logger.warning("Catalogue returned 0 markets — skipping book run")
 
@@ -674,6 +673,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Force re-run even if data already exists in S3 for this date."
     )
+
+    # --snapshot-type stamps PRE_RACE or POST_RACE into the S3 path
+    # so pre-race order book and post-race BSP land in separate folders.
+    # Must be declared BEFORE parse_args() so argparse recognises the argument.
+    parser.add_argument(
+        "--snapshot-type",
+        choices=["PRE_RACE", "POST_RACE"],
+        default=None,
+        dest="snapshot_type",
+        help="PRE_RACE=afternoon book run | POST_RACE=night book run"
+    )
+
     args = parser.parse_args()
 
     SYDNEY = ZoneInfo("Australia/Sydney")
@@ -705,5 +716,4 @@ if __name__ == "__main__":
     # Initialise the pipeline (connects to S3, SNS, logs in to Betfair)
     # then dispatch to the correct run method based on --mode.
     pipeline = BetfairPipeline(config)
-    pipeline.run(args.mode, from_utc, to_utc, today, args.overwrite)
-    
+    pipeline.run(args.mode, from_utc, to_utc, today, args.overwrite, args.snapshot_type)
