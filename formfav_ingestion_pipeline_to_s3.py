@@ -581,6 +581,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Force re-run even if data already exists in S3 for this date.",
     )
+    parser.add_argument(
+        "--snapshot-type",
+        choices=["PRE_RACE", "POST_RACE"],
+        default=None,
+        dest="snapshot_type",
+        help="PRE_RACE=morning run | POST_RACE=night run",
+    )
     args = parser.parse_args()
 
     SYDNEY = ZoneInfo("Australia/Sydney")
@@ -610,7 +617,11 @@ if __name__ == "__main__":
     )
 
     pipeline = FormFavPipeline(config)
-    pipeline.run(dates, race_codes, args.overwrite)
+    pipeline.run(dates, race_codes, args.overwrite, args.snapshot_type)
 
 
     # /Users/nageswarchowdarypotluri/.pyenv/versions/3.11.9/bin/python /Users/nageswarchowdarypotluri/my-de-project/formfav_ingestion_pipeline_to_s3.py --race-code harness
+
+
+
+
