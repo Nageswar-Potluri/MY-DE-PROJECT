@@ -137,7 +137,7 @@ def build_stream(source_path, schema_location, schema_hints, max_files):
             # Audit columns
             # _metadata.file_path is the Unity Catalog equivalent of input_file_name()
             .withColumn("_source_file",      F.col("_metadata.file_path"))
-            .withColumn("_bronze_loaded_at", F.current_timestamp())
+            .withColumn("_bronze_loaded_at", F.from_utc_timestamp(F.current_timestamp(), "Australia/Sydney"))
 
             # Derive snapshot_type from the S3 folder path
             # New files: .../snapshot_type=PRE_RACE/... → extracted
@@ -295,3 +295,18 @@ def show_dlo_summary():
 show_dlo_summary()
 
 # COMMAND ----------
+
+# cd /Users/nageswarchowdarypotluri/my-de-project
+# source .venv312/bin/activate
+# python3 bronze_autoloader.py
+
+# COMMAND ----------
+
+
+
+
+# # General Syntax
+# databricks fs cp /path/to/local/file dbfs:/FileStore/scripts/bronze_autoloader.py
+
+# # To overwrite an existing file, add the flag:
+# databricks fs cp /path/to/local/file dbfs:/FileStore/scripts/bronze_autoloader.py --overwrite
