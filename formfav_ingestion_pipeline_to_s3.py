@@ -76,66 +76,30 @@ COUNTRY_NAMES: Dict[str, str] = {
 
 # Track slug → Australian state, used to partition races by state in Silver/Gold.
 AU_TRACK_STATE: Dict[str, str] = {
-    # New South Wales
-    "albury": "NSW",             "armidale": "NSW",          "ballina": "NSW",
-    "bankstown": "NSW",          "bathurst": "NSW",           "berrigan": "NSW",
-    "broken-hill": "NSW",        "carrathool": "NSW",         "dubbo": "NSW",
-    "gosford": "NSW",            "goulburn": "NSW",           "grafton": "NSW",
-    "hawkesbury": "NSW",         "junee": "NSW",              "kembla-grange": "NSW",
-    "leeton": "NSW",             "lightning-ridge": "NSW",    "maitland": "NSW",
-    "menangle": "NSW",           "moree": "NSW",              "moruya": "NSW",
-    "mudgee": "NSW",             "muswellbrook": "NSW",       "narrabri": "NSW",
-    "newcastle": "NSW",          "nowra": "NSW",              "orange": "NSW",
-    "parkes": "NSW",             "penrith": "NSW",            "port-macquarie": "NSW",
-    "queanbeyan": "NSW",         "randwick": "NSW",           "randwick-kensington": "NSW",
-    "rosehill": "NSW",           "sapphire-coast": "NSW",     "scone": "NSW",
-    "tamworth": "NSW",           "taree": "NSW",              "temora": "NSW",
-    "tocumwal": "NSW",           "tuncurry": "NSW",           "wagga": "NSW",
-    "warren": "NSW",             "warwick-farm": "NSW",       "wyong": "NSW",
-    "young": "NSW",
-    # Victoria
-    "ararat": "VIC",             "avoca": "VIC",              "bairnsdale": "VIC",
-    "ballarat": "VIC",           "bendigo": "VIC",            "camperdown": "VIC",
-    "caulfield": "VIC",          "caulfield-heath": "VIC",    "charlton": "VIC",
-    "cranbourne": "VIC",         "echuca": "VIC",             "flemington": "VIC",
-    "geelong": "VIC",            "hamilton": "VIC",           "healesville": "VIC",
-    "kerang": "VIC",             "kilmore": "VIC",            "kyneton": "VIC",
-    "melton": "VIC",             "mildura": "VIC",            "mornington": "VIC",
-    "pakenham": "VIC",           "pioneer-park": "VIC",       "sale": "VIC",
-    "sandown": "VIC",            "shepparton": "VIC",         "stawell": "VIC",
-    "swan-hill": "VIC",          "terang": "VIC",             "wangaratta": "VIC",
-    "warracknabeal": "VIC",      "warrnambool": "VIC",        "werribee": "VIC",
-    "yarra-valley": "VIC",
-    # Queensland
-    "atherton": "QLD",           "augathella": "QLD",         "barcaldine": "QLD",
-    "beaudesert": "QLD",         "bundaberg": "QLD",          "cairns": "QLD",
-    "charleville": "QLD",        "cloncurry": "QLD",          "dalby": "QLD",
-    "doomben": "QLD",            "eagle-farm": "QLD",         "emerald": "QLD",
-    "flinton": "QLD",            "gladstone": "QLD",          "gold-coast": "QLD",
-    "gold-coast-polytrack": "QLD", "ipswich": "QLD",          "kilcoy": "QLD",
-    "longreach": "QLD",          "mackay": "QLD",             "marburg": "QLD",
-    "maryborough": "QLD",        "moranbah": "QLD",           "mount-isa": "QLD",
-    "nanango": "QLD",            "redcliffe": "QLD",          "rockhampton": "QLD",
-    "roma": "QLD",               "springsure": "QLD",         "sunshine-coast": "QLD",
-    "sunshine-coast-polytrack": "QLD", "toowoomba": "QLD",   "townsville": "QLD",
-    "warwick": "QLD",
-    # South Australia
-    "balaklava": "SA",           "clare": "SA",               "gawler": "SA",
-    "globe-derby": "SA",         "morphettville": "SA",       "morphettville-parks": "SA",
-    "mount-gambier": "SA",       "murray-bridge": "SA",       "oakbank": "SA",
-    "penola": "SA",              "port-lincoln": "SA",        "port-pirie": "SA",
-    "strathalbyn": "SA",         "streaky-bay": "SA",         "victor-harbor": "SA",
-    # Western Australia
-    "albany": "WA",              "ascot": "WA",               "belmont": "WA",
-    "bridgetown": "WA",          "bunbury": "WA",             "dongara": "WA",
-    "geraldton": "WA",           "gloucester-park": "WA",     "kalgoorlie": "WA",
-    "narrogin": "WA",            "northam": "WA",             "pinjarra": "WA",
-    "pinjarra-scarpside": "WA",  "wagin": "WA",               "york": "WA",
-    # Tasmania
-    "burnie": "TAS",             "hobart": "TAS",             "launceston": "TAS",
-    # Northern Territory
-    "alice-springs": "NT",       "darwin": "NT",
-    # Australian Capital Territory
+    "albury": "NSW", "armidale": "NSW", "ballina": "NSW", "bathurst": "NSW",
+    "dubbo": "NSW", "gosford": "NSW", "goulburn": "NSW", "grafton": "NSW",
+    "hawkesbury": "NSW", "kembla-grange": "NSW", "maitland": "NSW",
+    "menangle": "NSW", "moree": "NSW", "mudgee": "NSW", "muswellbrook": "NSW",
+    "newcastle": "NSW", "nowra": "NSW", "orange": "NSW", "penrith": "NSW",
+    "randwick": "NSW", "randwick-kensington": "NSW", "rosehill": "NSW",
+    "scone": "NSW", "tamworth": "NSW", "taree": "NSW", "wagga": "NSW",
+    "warwick-farm": "NSW", "wyong": "NSW", "young": "NSW",
+    "ararat": "VIC", "avoca": "VIC", "bairnsdale": "VIC", "ballarat": "VIC",
+    "bendigo": "VIC", "caulfield": "VIC", "cranbourne": "VIC", "echuca": "VIC",
+    "flemington": "VIC", "geelong": "VIC", "hamilton": "VIC", "kilmore": "VIC",
+    "melton": "VIC", "mildura": "VIC", "mornington": "VIC", "pakenham": "VIC",
+    "sale": "VIC", "sandown": "VIC", "shepparton": "VIC", "wangaratta": "VIC",
+    "warrnambool": "VIC", "werribee": "VIC", "yarra-valley": "VIC",
+    "beaudesert": "QLD", "bundaberg": "QLD", "cairns": "QLD", "doomben": "QLD",
+    "eagle-farm": "QLD", "gold-coast": "QLD", "ipswich": "QLD", "mackay": "QLD",
+    "maryborough": "QLD", "redcliffe": "QLD", "rockhampton": "QLD",
+    "sunshine-coast": "QLD", "toowoomba": "QLD", "townsville": "QLD",
+    "balaklava": "SA", "gawler": "SA", "globe-derby": "SA", "morphettville": "SA",
+    "murray-bridge": "SA", "oakbank": "SA", "port-lincoln": "SA",
+    "albany": "WA", "ascot": "WA", "belmont": "WA", "bunbury": "WA",
+    "gloucester-park": "WA", "kalgoorlie": "WA", "northam": "WA", "pinjarra": "WA",
+    "burnie": "TAS", "hobart": "TAS", "launceston": "TAS",
+    "alice-springs": "NT", "darwin": "NT",
     "canberra": "ACT",
 }
 
@@ -329,7 +293,7 @@ class FormFavPipeline:
                 "country":         country,
                 "country_name":    COUNTRY_NAMES.get(country, country.upper() if country else None),
                 "state":           AU_TRACK_STATE.get(track_slug) if country == "au" else None,
-                "number_of_races": m.get("numberOfRaces"),
+                "number_of_races": m.get("numberOfRaces") or len(m.get("races") or []),
                 "track_condition": m.get("trackCondition"),
                 "weather":         m.get("weather"),
             }
@@ -352,7 +316,7 @@ class FormFavPipeline:
                 logger.warning(f"Meeting missing track_slug — skipping: {meeting}")
                 continue
 
-            num_races = meeting.get("number_of_races") or 10  # use known count, cap at 10
+            num_races = meeting.get("number_of_races") or 15
             for race_num in range(1, num_races + 1):
                 try:
                     data = self._call_race_api(date_str, track_slug, race_num, race_code)
@@ -471,6 +435,26 @@ class FormFavPipeline:
             logger.info(f"No {race_code} meetings on {date_str} — skipping")
             return False
 
+        # --- RACES (collect first so we can count per meeting before uploading meetings) ---
+        validated_races = [
+            r
+            for r in (self.validate_race(rec, date_str) for rec in self.fetch_races(date_str, race_code, raw_meetings))
+            if r is not None
+        ]
+
+        # Count actual races per track_slug and write back into raw_meetings
+        race_counts: Dict[str, int] = {}
+        for r in validated_races:
+            slug = r.get("track_slug")
+            if slug:
+                race_counts[slug] = race_counts.get(slug, 0) + 1
+
+        for m in raw_meetings:
+            m["number_of_races"] = race_counts.get(m.get("track_slug"), 0)
+
+        logger.info(f"Race counts per meeting: { {m['track_slug']: m['number_of_races'] for m in raw_meetings} }")
+
+        # --- UPLOAD MEETINGS (now with correct number_of_races) ---
         validated_meetings = [
             r
             for r in (self.validate_meeting(m, date_str) for m in raw_meetings)
@@ -492,14 +476,8 @@ class FormFavPipeline:
             f"Meetings done | {race_code} {date_str} | Uploaded: {meetings_uploaded}"
         )
 
-        # --- RACES ---
-        race_stream = (
-            r
-            for r in (self.validate_race(rec, date_str) for rec in self.fetch_races(date_str, race_code, raw_meetings))
-            if r is not None
-        )
-
-        for i, batch in enumerate(self.batch_records(race_stream, batch_size=50)):
+        # --- UPLOAD RACES ---
+        for i, batch in enumerate(self.batch_records(iter(validated_races), batch_size=50)):
             key = (
                 f"formfav/races/extracted_date={date_str}"
                 f"/race_code={race_code}{snapshot_segment}/run_time={run_time}/batch_{i}.json"

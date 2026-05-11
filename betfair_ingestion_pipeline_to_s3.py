@@ -1,9 +1,10 @@
 import os
 import json
+import time
 import logging
 import argparse
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Iterator, Dict, Any, Optional, List
 
@@ -14,10 +15,6 @@ from pydantic import BaseModel, ValidationError
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 # -------------------- LOGGING --------------------
-# Sets up structured logging for the entire script.
-# Every log message will show: timestamp - level - message
-# Replaces print() — gives us INFO, WARNING, ERROR levels
-# so we can filter logs in production (CloudWatch, terminal, cron logs)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
@@ -26,11 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 # -------------------- CONFIG --------------------
-# Frozen dataclass acts as the single source of truth for all configuration.
-# frozen=True means no field can be changed after creation — prevents
-# accidental overwrites mid-pipeline (e.g. token refresh changing api_key).
-# All credentials come from .env files — never hardcoded in source code.
-# sns_topic_arn is optional — when set, pipeline sends failure alerts via AWS SNS.
 @dataclass(frozen=True)
 class BetfairConfig:
     api_key: str
@@ -45,17 +37,9 @@ class BetfairConfig:
     sns_topic_arn: Optional[str] = None
 
 
-# Load credentials from two separate .env files:
-# betfair_credits.env  → Betfair API username, password, app key
-# aws_s3.env           → AWS access key, secret key
-# os.path.dirname(__file__) ensures the .env path is relative to this script,
-# not wherever the terminal is when we run it
 load_dotenv(os.path.join(os.path.dirname(__file__), "betfair_credits.env"))
 load_dotenv(os.path.join(os.path.dirname(__file__), "aws_s3.env"))
 
-# Build the config object by reading environment variables loaded above.
-# If any required variable is missing, os.getenv() returns None silently here —
-# the config validation block below catches this before the pipeline starts.
 config = BetfairConfig(
     api_key=os.getenv("BETFAIR_APP_KEY"),
     login_url=os.getenv("BETFAIR_LOGIN_URL"),
@@ -68,11 +52,6 @@ config = BetfairConfig(
     sns_topic_arn=os.getenv("SNS_TOPIC_ARN"),
 )
 
-# -------------------- CONFIG VALIDATION --------------------
-# Fail immediately with a clear message if any required env variable is missing.
-# Without this, the script would start, connect to Betfair, then crash mid-run
-# with a confusing error like "NoneType has no attribute strip".
-# Production standard: validate all inputs at startup, not mid-execution.
 required_vars = [
     "BETFAIR_APP_KEY",
     "BETFAIR_LOGIN_URL",
@@ -88,97 +67,56 @@ if missing:
 
 
 # -------------------- PYDANTIC SCHEMAS --------------------
-# MarketCatalogue validates the morning catalogue API response.
-# Each record represents one race market (e.g. "R1 1400m Mdn at Randwick").
-# ADDED: competition_id, competition_name from COMPETITION projection
-# ADDED: betting_type, each_way_divisor, turn_in_play, rules from MARKET_DESCRIPTION projection
-# market_id is the key that links catalogue → book → runners downstream.
-# extra="ignore" silently drops any fields Betfair adds that we don't need,
-# so new API fields never break validation.
 class MarketCatalogue(BaseModel):
     model_config = {"extra": "ignore"}
-
-    # market level
     market_id: Optional[str] = None
     market_name: Optional[str] = None
     market_start_time: Optional[str] = None
     total_matched: Optional[float] = None
-    runners: Optional[List[Dict[str, Any]]] = None  # nested list of runners, flattened in Silver
-
-    # event type level
+    runners: Optional[List[Dict[str, Any]]] = None
     event_type_id: Optional[str] = None
     event_type_name: Optional[str] = None
-
-    # event level
     event_id: Optional[str] = None
     event_name: Optional[str] = None
     event_country: Optional[str] = None
     event_timezone: Optional[str] = None
     event_venue: Optional[str] = None
     event_open_date: Optional[str] = None
-
-    # ADDED: competition level — identifies race series / class (e.g. Group 1, Benchmark 78)
     competition_id: Optional[str] = None
     competition_name: Optional[str] = None
-
-    # ADDED: market description — betting rules and structure from MARKET_DESCRIPTION projection
-    betting_type: Optional[str] = None         # WIN, PLACE, EACH_WAY etc.
-    each_way_divisor: Optional[float] = None   # place payout divisor for each-way markets
-    turn_in_play: Optional[bool] = None        # True if market goes in-play during race
-    rules: Optional[str] = None               # full market rules text
+    betting_type: Optional[str] = None
+    each_way_divisor: Optional[float] = None
+    turn_in_play: Optional[bool] = None
+    rules: Optional[str] = None
 
 
-# MarketBook validates the book API response (odds + BSP).
-# Each record represents the current state of one market's order book.
-# ADDED: isMarketDataDelayed, betDelay, crossMatchingEnabled from API docs review
-# runners contains nested back/lay prices and BSP data —
-# kept as raw nested list here (Bronze layer) for flattening later in Databricks.
-# status tells us if the market is OPEN, SUSPENDED, or CLOSED.
 class MarketBook(BaseModel):
     model_config = {"extra": "ignore"}
-
     marketId: Optional[str] = None
-    status: Optional[str] = None            # OPEN / SUSPENDED / CLOSED
-    totalMatched: Optional[float] = None    # total money matched in this market
-    totalAvailable: Optional[float] = None  # money still available to be matched
-    runners: Optional[List[Dict[str, Any]]] = None  # nested: back/lay/BSP per horse
-
-    # ADDED: market-level metadata fields discovered in API docs review
-    isMarketDataDelayed: Optional[bool] = None  # True if non-premium subscription (3s delay)
-    betDelay: Optional[int] = None              # seconds of bet delay when market goes in-play
-    crossMatchingEnabled: Optional[bool] = None # True if cross-matching with other exchanges
-    runnersVoidable: Optional[bool] = None      # True if runners can be voided (scratchings)
-    version: Optional[int] = None              # market version number — increments on changes
-    complete: Optional[bool] = None            # True if market data is complete
+    status: Optional[str] = None
+    totalMatched: Optional[float] = None
+    totalAvailable: Optional[float] = None
+    runners: Optional[List[Dict[str, Any]]] = None
+    isMarketDataDelayed: Optional[bool] = None
+    betDelay: Optional[int] = None
+    crossMatchingEnabled: Optional[bool] = None
+    runnersVoidable: Optional[bool] = None
+    version: Optional[int] = None
+    complete: Optional[bool] = None
 
 
-# -------------------- PIPELINE --------------------
-# BetfairPipeline encapsulates the entire extract → validate → upload workflow.
-# Using a class (not bare functions) lets us share state across methods:
-# - self.token: session token used by all API calls
-# - self.s3: single reusable S3 client
-# - self.sns: single reusable SNS client (if alerting is configured)
-# This avoids passing credentials and clients as arguments to every function.
+# -------------------- PIPELINE CLASS --------------------
 class BetfairPipeline:
-
-    # Class-level constant — shared across all instances, not duplicated per method
     SYDNEY = ZoneInfo("Australia/Sydney")
 
     def __init__(self, config: BetfairConfig):
         self.config = config
-
-        # Single S3 client shared across all upload and list operations.
-        # Creating it once here avoids re-authenticating with AWS on every batch upload.
         self.s3 = boto3.client(
             "s3",
             aws_access_key_id=config.aws_access_key,
             aws_secret_access_key=config.aws_secret_key,
             region_name=config.region
         )
-
-        # SNS client only created if an SNS topic ARN is configured.
-        # If sns_topic_arn is None (no alerting), self.sns is None and
-        # _send_alert() will skip silently — no crash.
         self.sns = (
             boto3.client(
                 "sns",
@@ -188,23 +126,9 @@ class BetfairPipeline:
             )
             if config.sns_topic_arn else None
         )
-
-        # Log in to Betfair immediately on startup and store the session token.
-        # All subsequent API calls (catalogue, book) use this token in their headers.
         self.token = self._get_session_token()
 
-    # -------------------- AUTH --------------------
-    # Logs in to Betfair and returns a session token (valid for ~8 hours).
-    # @retry retries up to 3 times with exponential backoff (2s → 4s → 8s)
-    # if the login fails due to network issues.
-    # Raises Exception if status != SUCCESS so tenacity knows to retry.
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(min=2, max=10),
-        before_sleep=lambda rs: logger.warning(
-            f"Login failed — retrying... attempt {rs.attempt_number}"
-        )
-    )
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=10))
     def _get_session_token(self) -> str:
         response = requests.post(
             self.config.login_url,
@@ -217,25 +141,12 @@ class BetfairPipeline:
         logger.info("Betfair login successful")
         return data["token"]
 
-    # -------------------- TOKEN REFRESH --------------------
-    # Betfair session tokens expire after ~8 hours.
-    # If any API call returns 401/403, it likely means the token has expired.
-    # This method refreshes the token and raises an exception so tenacity
-    # retries the original API call with the new token.
-    # Called inside every API method before raising the final error.
     def _handle_session_error(self, response: requests.Response):
-        # 400 is a payload/market-ID error, not an auth error — must not trigger token refresh
         if response.status_code in {401, 403}:
-            logger.warning(f"Session error ({response.status_code}) — refreshing token and retrying")
+            logger.warning(f"Session error ({response.status_code}) — refreshing token")
             self.token = self._get_session_token()
-            raise Exception(f"Token refreshed after {response.status_code} — will retry")
+            raise Exception("Token refreshed — retrying")
 
-    # -------------------- IDEMPOTENCY --------------------
-    # Checks whether any files already exist under a given S3 prefix.
-    # Used before both catalogue and book runs to prevent duplicate uploads
-    # when the same date is accidentally re-run (e.g. cron fires twice).
-    # Returns True if files exist (skip the run), False if safe to proceed.
-    # Paginator handles prefixes with more than 1000 files (S3 list limit).
     def _s3_prefix_has_files(self, prefix: str) -> bool:
         paginator = self.s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.config.s3_bucket, Prefix=prefix):
@@ -243,204 +154,72 @@ class BetfairPipeline:
                 return True
         return False
 
-    # -------------------- ALERTING --------------------
-    # Publishes a failure notification to AWS SNS when the pipeline crashes.
-    # SNS then forwards the alert to whatever is subscribed — email, Slack, PagerDuty.
-    # Silently skips if no SNS topic is configured (sns_topic_arn = None).
-    # Wrapped in try/except so an alert failure never masks the original error.
     def _send_alert(self, subject: str, message: str):
-        if not self.sns or not self.config.sns_topic_arn:
-            logger.info("Alerting not configured — skipping SNS")
-            return
+        if not self.sns: return
         try:
-            self.sns.publish(
-                TopicArn=self.config.sns_topic_arn,
-                Subject=subject,
-                Message=message
-            )
-            logger.info("Alert sent via SNS")
+            self.sns.publish(TopicArn=self.config.sns_topic_arn, Subject=subject, Message=message)
         except Exception as e:
-            logger.error(f"Failed to send SNS alert: {e}")
+            logger.error(f"Alert failed: {e}")
 
-    # -------------------- CATALOGUE API --------------------
-    # Calls Betfair's listMarketCatalogue endpoint and returns a list of AU WIN markets.
-    # This is a plain method (not a generator) so @retry works correctly —
-    # tenacity can only retry a function that raises, not one that yields.
-    # The UTC time window (from_utc → to_utc) covers the full AEST race day.
-    #
-    # ADDED projections vs previous version:
-    #   COMPETITION     → competition name and ID (race series / class)
-    #   MARKET_DESCRIPTION → betting type, each-way divisor, turn-in-play flag, rules
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(min=2, max=10),
-        before_sleep=lambda rs: logger.warning(
-            f"Catalogue API failed — retrying... attempt {rs.attempt_number}"
-        )
-    )
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=10))
     def _call_market_catalogue_api(self, from_utc: str, to_utc: str) -> List[Dict[str, Any]]:
-        headers = {
-            "X-Application": self.config.api_key,
-            "X-Authentication": self.token,
-            "Content-Type": "application/json",
-        }
+        headers = {"X-Application": self.config.api_key, "X-Authentication": self.token, "Content-Type": "application/json"}
         payload = {
             "filter": {
-                "eventTypeIds": ["7"],          # 7 = Horse Racing
-                "marketCountries": ["AU"],       # Australian markets only
-                "marketTypeCodes": ["WIN"],      # WIN markets only (not PLACE, EACH_WAY etc.)
+                "eventTypeIds": ["7"], "marketCountries": ["AU"], "marketTypeCodes": ["WIN"],
                 "marketStartTime": {"from": from_utc, "to": to_utc}
             },
-            "marketProjection": [
-                "EVENT",                # event name, id, country, timezone, venue, openDate
-                "MARKET_START_TIME",    # scheduled race start time
-                "RUNNER_DESCRIPTION",   # runner names, selection IDs, sort priority
-                "EVENT_TYPE",           # event type name and id (Horse Racing)
-                "COMPETITION",          # ADDED: competition name/id — race series and class
-                "MARKET_DESCRIPTION",   # ADDED: betting type, each-way divisor, rules, turn-in-play
-            ],
-            "maxResults": "200",
-            "sort": "FIRST_TO_START"
+            "marketProjection": ["EVENT", "MARKET_START_TIME", "RUNNER_DESCRIPTION", "EVENT_TYPE", "COMPETITION", "MARKET_DESCRIPTION"],
+            "maxResults": "200", "sort": "FIRST_TO_START"
         }
-        response = requests.post(
-            self.config.api_url + "listMarketCatalogue/",
-            json=payload,
-            headers=headers,
-            timeout=30
-        )
+        response = requests.post(self.config.api_url + "listMarketCatalogue/", json=payload, headers=headers, timeout=30)
         self._handle_session_error(response)
-        if response.status_code != 200:
-            raise Exception(f"Catalogue API failed: {response.status_code} — {response.text}")
         return response.json()
 
-    # -------------------- CATALOGUE GENERATOR --------------------
-    # Calls the catalogue API and yields one flat dict per market.
-    # Uses a generator (yield) so records stream one at a time into the
-    # validation and batching steps — avoids loading all 200 markets into memory at once.
-    # Nested API fields (eventType{}, event{}, competition{}, description{}) are
-    # flattened here into simple keys for straightforward Pydantic validation and S3 storage.
-    #
-    # ADDED fields vs previous version:
-    #   competition_id, competition_name  → from COMPETITION projection
-    #   betting_type, each_way_divisor, turn_in_play, rules → from MARKET_DESCRIPTION projection
     def fetch_markets(self, from_utc: str, to_utc: str) -> Iterator[Dict[str, Any]]:
         markets = self._call_market_catalogue_api(from_utc, to_utc)
-        logger.info(f"Fetched {len(markets)} markets")
         for market in markets:
             yield {
-                # market level
-                "market_id":         market.get("marketId"),
-                "market_name":       market.get("marketName"),
+                "market_id": market.get("marketId"),
+                "market_name": market.get("marketName"),
                 "market_start_time": market.get("marketStartTime"),
-                "total_matched":     market.get("totalMatched"),
-                "runners":           market.get("runners"),           # kept nested for Bronze
-
-                # event type level
-                "event_type_id":     market.get("eventType", {}).get("id"),
-                "event_type_name":   market.get("eventType", {}).get("name"),
-
-                # event level
-                "event_id":          market.get("event", {}).get("id"),
-                "event_name":        market.get("event", {}).get("name"),
-                "event_country":     market.get("event", {}).get("countryCode"),
-                "event_timezone":    market.get("event", {}).get("timezone"),
-                "event_venue":       market.get("event", {}).get("venue"),
-                "event_open_date":   market.get("event", {}).get("openDate"),
-
-                # ADDED: competition level — race series and class
-                "competition_id":    market.get("competition", {}).get("id"),
-                "competition_name":  market.get("competition", {}).get("name"),
-
-                # ADDED: market description — structure and rules from MARKET_DESCRIPTION
-                "betting_type":      market.get("description", {}).get("bettingType"),
-                "each_way_divisor":  market.get("description", {}).get("eachWayDivisor"),
-                "turn_in_play":      market.get("description", {}).get("turnInPlayEnabled"),
-                "rules":             market.get("description", {}).get("rules"),
+                "total_matched": market.get("totalMatched"),
+                "runners": market.get("runners"),
+                "event_type_id": market.get("eventType", {}).get("id"),
+                "event_type_name": market.get("eventType", {}).get("name"),
+                "event_id": market.get("event", {}).get("id"),
+                "event_name": market.get("event", {}).get("name"),
+                "event_country": market.get("event", {}).get("countryCode"),
+                "event_timezone": market.get("event", {}).get("timezone"),
+                "event_venue": market.get("event", {}).get("venue"),
+                "event_open_date": market.get("event", {}).get("openDate"),
+                "competition_id": market.get("competition", {}).get("id"),
+                "competition_name": market.get("competition", {}).get("name"),
+                "betting_type": market.get("description", {}).get("bettingType"),
+                "each_way_divisor": market.get("description", {}).get("eachWayDivisor"),
+                "turn_in_play": market.get("description", {}).get("turnInPlayEnabled"),
+                "rules": market.get("description", {}).get("rules"),
             }
 
-    # -------------------- BOOK API --------------------
-    # Calls Betfair's listMarketBook endpoint for a batch of market IDs.
-    # Returns current odds snapshot for each market.
-    #
-    # priceData uses only valid Betfair REST API enum values:
-    #   EX_BEST_OFFERS  → best 3 back/lay prices per runner
-    #   EX_TRADED       → tradedVolume (volume at each price) + lastPriceTraded (LTP) per runner
-    #   SP_TRADED       → final BSP after race settles
-    # NOTE: EX_LTP and EX_TRADED_VOL are NOT valid REST API enum values → cause DSC-0008
-    #
-    # WEIGHT: each priceData option adds ~3 weight points per market.
-    # 3 options × 8 markets = ~72 weight per request — well within the 200 limit.
-    #
-    # Pre-race run:  EX_BEST_OFFERS populated, SP_TRADED empty (market still open)
-    # Post-race run: SP_TRADED (BSP) populated, EX_BEST_OFFERS empty (market closed)
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(min=2, max=10),
-        before_sleep=lambda rs: logger.warning(
-            f"Book API failed — retrying... attempt {rs.attempt_number}"
-        )
-    )
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=10))
     def _call_market_book_api(self, market_ids: List[str]) -> List[Dict[str, Any]]:
-        headers = {
-            "X-Application": self.config.api_key,
-            "X-Authentication": self.token,
-            "Content-Type": "application/json",
-        }
+        headers = {"X-Application": self.config.api_key, "X-Authentication": self.token, "Content-Type": "application/json"}
         payload = {
             "marketIds": market_ids,
-            "priceProjection": {
-                "priceData": [
-                    "EX_BEST_OFFERS",   # best 3 back and lay prices — valid REST API enum
-                    "EX_TRADED",        # traded volume + last traded price — valid REST API enum
-                    "SP_TRADED",        # final BSP post-race — valid REST API enum
-                    # REMOVED: EX_LTP, EX_TRADED_VOL — not valid Betfair PriceData enums → DSC-0008
-                    # REMOVED: SP_PROJECTED, SP_AVAILABLE — also cause DSC-0008 on REST API
-                    # Full valid enum: SP_TRADED, SP_PROJECTED, EX_BEST_OFFERS, EX_ALL_OFFERS, EX_TRADED
-                ],
-                "virtualise": False     # exclude virtual bets from prices
-            }
+            "priceProjection": {"priceData": ["EX_BEST_OFFERS", "EX_TRADED", "SP_TRADED"], "virtualise": False}
         }
-        response = requests.post(
-            self.config.api_url + "listMarketBook/",
-            json=payload,
-            headers=headers,
-            timeout=30
-        )
+        response = requests.post(self.config.api_url + "listMarketBook/", json=payload, headers=headers, timeout=30)
         self._handle_session_error(response)
-        if response.status_code != 200:
-            # Log the full response body so we can see Betfair's actual error message
-            logger.error(f"Book API error {response.status_code} — {response.text}")
-            raise Exception(f"Book API failed: {response.status_code} — {response.text}")
         return response.json()
 
-    # -------------------- VALIDATION --------------------
-    # Validates a single catalogue record against the MarketCatalogue schema.
-    # Returns the validated dict if valid, None if invalid.
-    # Returning None (not {}) ensures empty records are filtered out
-    # before reaching S3 — an empty dict would silently corrupt downstream data.
     def validate_catalogue(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        try:
-            return MarketCatalogue(**record).model_dump()
-        except ValidationError as e:
-            logger.warning(f"Catalogue validation failed: {e}")
-            return None
+        try: return MarketCatalogue(**record).model_dump()
+        except ValidationError: return None
 
-    # Validates a single book record against the MarketBook schema.
-    # Same pattern as validate_catalogue — returns None on failure so
-    # invalid records never reach S3.
     def validate_book(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        try:
-            return MarketBook(**record).model_dump()
-        except ValidationError as e:
-            logger.warning(f"Book validation failed: {e}")
-            return None
+        try: return MarketBook(**record).model_dump()
+        except ValidationError: return None
 
-    # -------------------- BATCHING --------------------
-    # Groups records from an iterator into fixed-size batches before uploading.
-    # Using a generator (yield) means each batch is uploaded immediately —
-    # we never hold the entire dataset in memory at once.
-    # The final yield handles the last partial batch (e.g. 20 records when batch_size=50).
-    # Used for catalogue (batch_size=50) and book API calls (batch_size=8).
     def batch_records(self, iterator: Iterator[Dict[str, Any]], batch_size: int = 50):
         batch = []
         for record in iterator:
@@ -448,272 +227,173 @@ class BetfairPipeline:
             if len(batch) >= batch_size:
                 yield batch
                 batch = []
-        if batch:   # flush remaining records that didn't fill a full batch
-            yield batch
+        if batch: yield batch
 
-    # -------------------- S3 UPLOAD --------------------
-    # Uploads a batch of records to S3 as NDJSON (newline-delimited JSON).
-    # NDJSON format: one JSON object per line — required for Databricks Auto Loader
-    # to read files incrementally without loading the whole file into memory.
-    # @retry retries up to 3 times if S3 is temporarily unavailable.
-    # Key includes Hive-style partition (extracted_date=, run_time=) so
-    # Databricks can filter by date and time without scanning all files.
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(min=2, max=10),
-        before_sleep=lambda rs: logger.warning(
-            f"S3 upload failed — retrying... attempt {rs.attempt_number}"
-        )
-    )
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=10))
     def upload_batch(self, records: List[Dict[str, Any]], key: str):
         body = "\n".join(json.dumps(r) for r in records).encode("utf-8")
-        self.s3.put_object(
-            Bucket=self.config.s3_bucket,
-            Key=key,
-            Body=body,
-            ContentType="application/json"
-        )
-        logger.info(f"Uploaded {len(records)} records → s3://{self.config.s3_bucket}/{key}")
+        self.s3.put_object(Bucket=self.config.s3_bucket, Key=key, Body=body, ContentType="application/json")
+        logger.info(f"Uploaded {len(records)} records → {key}")
 
-    # -------------------- RUN CATALOGUE --------------------
-    # Morning run — fetches all AU WIN markets for today and saves to S3.
-    # Flow: API call → generator → validate → filter None → batch → upload
-    # run_time is stamped into the S3 path so each run produces its own folder,
-    # making it easy to identify when the data was captured.
-    # Returns True if any data was uploaded — the dispatcher uses this
-    # to decide whether to proceed with the book run.
     def run_catalogue(self, from_utc: str, to_utc: str, today: str, overwrite: bool = False) -> bool:
         prefix = f"betfair/market_catalogue/extracted_date={today}/"
-
-        # Skip if data already exists for this date — prevents duplicate uploads
-        # when cron fires twice or a backfill is re-run accidentally.
-        # Returns True so the dispatcher still proceeds with the book run.
         if not overwrite and self._s3_prefix_has_files(prefix):
-            logger.info(f"Catalogue already exists for {today} — skipping (use --overwrite to re-run)")
             return True
-
-        logger.info(f"Starting catalogue run for {today} ({from_utc} → {to_utc} UTC)")
-
-        # Capture the AEST run time once for all S3 keys in this run.
-        # Stamped into path as run_time=HH-MM so morning and night runs
-        # land in separate folders under the same extracted_date partition.
         run_time = datetime.now(self.SYDNEY).strftime("%H-%M")
-        success, failed = 0, 0
-
-        # Chain: fetch → validate → filter invalid records → batch → upload
-        # Generator expression keeps the pipeline lazy — one record flows through
-        # at a time rather than loading all 200 markets into memory first.
-        validated_stream = (
-            r
-            for r in (self.validate_catalogue(rec) for rec in self.fetch_markets(from_utc, to_utc))
-            if r is not None   # drop records that failed Pydantic validation
-        )
-
+        success = 0
+        validated_stream = (r for r in (self.validate_catalogue(rec) for rec in self.fetch_markets(from_utc, to_utc)) if r is not None)
         for i, batch in enumerate(self.batch_records(validated_stream, batch_size=50)):
-            # S3 path: betfair/market_catalogue/extracted_date=YYYY-MM-DD/run_time=HH-MM/batch_N.json
-            key = f"betfair/market_catalogue/extracted_date={today}/run_time={run_time}/batch_{i}.json"
-            try:
-                self.upload_batch(batch, key)
-                success += len(batch)
-            except Exception as e:
-                logger.error(f"Catalogue upload failed after retries: {e}")
-                failed += len(batch)
+            for record in batch:
+                record["extracted_date"], record["run_time"], record["snapshot_type"] = today, run_time, None
+            key = f"{prefix}run_time={run_time}/batch_{i}.json"
+            self.upload_batch(batch, key)
+            success += len(batch)
+        return success > 0
 
-        logger.info(f"Catalogue done | Success: {success} | Failed: {failed}")
-        return success > 0   # False if 0 markets found — dispatcher will skip book run
+    # -------------------- DYNAMIC HELPERS (THE FIX) --------------------
+    def load_schedule_from_s3(self, today: str) -> List[tuple]:
+        logger.info(f"Loading schedule from S3 for {today}")
+        prefix = f"betfair/market_catalogue/extracted_date={today}/"
+        try:
+            res = self.s3.list_objects_v2(Bucket=self.config.s3_bucket, Prefix=prefix)
+            if 'Contents' not in res: return []
+            all_markets = []
+            for obj in res['Contents']:
+                if not obj['Key'].endswith('.json'): continue
+                f = self.s3.get_object(Bucket=self.config.s3_bucket, Key=obj['Key'])
+                for line in f['Body'].read().decode('utf-8').strip().splitlines():
+                    all_markets.append(json.loads(line))
+            unique_markets = {m['market_id']: m for m in all_markets}.values()
+            return self._group_and_format(list(unique_markets))
+        except Exception as e:
+            logger.error(f"Schedule load failed: {e}")
+            return []
 
-    # -------------------- RUN BOOK --------------------
-    # Night run — reads market IDs from today's catalogue in S3, then
-    # fetches the current odds snapshot for each market.
-    # Reads from S3 instead of calling the catalogue API again — avoids an
-    # extra API call and uses the exact same market IDs we already stored.
-    #
-    def run_book(self, today: str, overwrite: bool = False, snapshot_type: str = None):
+    def _group_and_format(self, markets: List[Dict]) -> List[tuple]:
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for m in markets:
+            st = m.get("market_start_time")
+            if st:
+                dt = datetime.fromisoformat(st.replace("Z", "+00:00"))
+                groups[dt].append(m["market_id"])
+        schedule = []
+        for dt in sorted(groups.keys()):
+            trigger = dt - timedelta(minutes=5)
+            aest = dt.astimezone(self.SYDNEY).strftime("%H:%M")
+            schedule.append((dt, trigger, groups[dt], aest))
+        return schedule
 
-        book_prefix = (
-            f"betfair/market_book/extracted_date={today}/snapshot_type={snapshot_type}/"
-            if snapshot_type
-            else f"betfair/market_book/extracted_date={today}/"
-        )
+    def run_dynamic(self, today: str):
+        POLL_INTERVAL = 15
+        MAX_DURATION = timedelta(minutes=15)
+        processed_market_ids = set()
 
-        if not overwrite and self._s3_prefix_has_files(book_prefix):
-            logger.info(f"Book already exists for {today} {snapshot_type or ''} — skipping")
-            return
+        while True:
+            logger.info("Refreshing catalogue...")
+            now_refresh = datetime.now(timezone.utc)
+            refresh_to = (now_refresh + timedelta(days=1)).replace(hour=0, minute=0, second=0)
+            self.run_catalogue(now_refresh.strftime("%Y-%m-%dT%H:%M:%SZ"), refresh_to.strftime("%Y-%m-%dT%H:%M:%SZ"), today, overwrite=True)
+            
+            full_schedule = self.load_schedule_from_s3(today)
+            active_schedule = [item for item in full_schedule if item[0] > datetime.now(timezone.utc) and not any(mid in processed_market_ids for mid in item[2])]
 
-        logger.info(f"Starting book run for {today} | snapshot_type={snapshot_type or 'None'}")
+            if not active_schedule:
+                logger.info("No races found. Sleeping 10 mins...")
+                time.sleep(600)
+                continue
 
-        # List ALL catalogue files under today's partition.
-        # Using a paginator handles cases where there are more than 1000 files.
-        # This picks up files from any run_time folder (e.g. 07-30, 11-00)
-        # so a backfill or re-run still finds the correct catalogue files.
-        catalogue_prefix = f"betfair/market_catalogue/extracted_date={today}/"
-        paginator = self.s3.get_paginator("list_objects_v2")
-        pages = paginator.paginate(Bucket=self.config.s3_bucket, Prefix=catalogue_prefix)
-        catalogue_keys = [obj["Key"] for page in pages for obj in page.get("Contents", [])]
+            start_time, trigger_time, market_ids, aest_str = active_schedule[0]
+            wait_secs = (trigger_time - datetime.now(timezone.utc)).total_seconds()
+            # if wait_secs > 0:
+            #     logger.info(f"Waiting {wait_secs/60:.1f} min for {aest_str} AEST")
+            #     time.sleep(wait_secs)
+            if wait_secs > 0:
+                # HEARTBEAT: Sleep for 15 mins (900s) max at a time.
+                # This forces the loop to restart and refresh the catalogue 
+                # even if the next race is hours away.
+                sleep_chunk = min(wait_secs, 900) 
+                
+                logger.info(f"Next race at {aest_str}. Checking again in {sleep_chunk/60:.1f} min...")
+                time.sleep(sleep_chunk)
+                
+                # If we still have a long wait after this heartbeat, 
+                # 'continue' jumps back to the top of 'while True' to refresh!
+                if wait_secs > 900:
+                    continue 
 
-        if not catalogue_keys:
-            logger.warning(f"No catalogue files found under {catalogue_prefix} — was catalogue run skipped?")
-            return
+            poll_start = datetime.now(timezone.utc)
+            while True:
+                run_time = datetime.now(self.SYDNEY).strftime("%H-%M-%S")
+                try:
+                    all_val = []
+                    for i in range(0, len(market_ids), 8):
+                        books = self._call_market_book_api(market_ids[i:i+8])
+                        all_val.extend([r for r in (self.validate_book(b) for b in books) if r is not None])
+                    if all_val:
+                        for r in all_val:
+                            r["extracted_date"], r["run_time"], r["snapshot_type"] = today, run_time, "PRE_RACE"
+                        self.upload_batch(all_val, f"betfair/market_book/extracted_date={today}/snapshot_type=PRE_RACE/run_time={run_time}/batch_0.json")
+                        if {r.get("status") for r in all_val} <= {"CLOSED"}: break
+                    if datetime.now(timezone.utc) - poll_start > MAX_DURATION: break
+                    time.sleep(POLL_INTERVAL)
+                except Exception as e:
+                    logger.error(f"Poll error: {e}"); time.sleep(POLL_INTERVAL)
+            
+            for mid in market_ids: processed_market_ids.add(mid)
 
-        logger.info(f"Found {len(catalogue_keys)} catalogue file(s) in S3 — reading market IDs")
-
-        # Read every catalogue NDJSON file and collect market IDs.
-        # Each line in the file is one JSON record — parse each line separately.
-        market_ids: List[str] = []
-        for key in catalogue_keys:
-            obj = self.s3.get_object(Bucket=self.config.s3_bucket, Key=key)
-            lines = obj["Body"].read().decode("utf-8").strip().splitlines()
-            for line in lines:
-                mid = json.loads(line).get("market_id")
-                if mid:
-                    market_ids.append(mid)
-
-        # Remove duplicates while preserving insertion order.
-        # Prevents calling the Betfair book API twice for the same market
-        # if it appeared in multiple catalogue batches or re-runs.
-        market_ids = list(dict.fromkeys(market_ids))
-        logger.info(f"{len(market_ids)} unique market IDs loaded from S3")
-
-        if not market_ids:
-            logger.warning("No market IDs found — skipping book run")
-            return
-
-        # Stamp run_time into S3 path — separates pre-race and post-race book snapshots.
-        # Pre-race run (e.g. 11-00) captures live order book (EX_BEST_OFFERS) + SP_PROJECTED.
-        # Post-race run (e.g. 23-30) captures final BSP (SP_TRADED).
-        run_time = datetime.now(self.SYDNEY).strftime("%H-%M")
-        success, failed = 0, 0
-
-        batch_size = 8
-
-        for i in range(0, len(market_ids), batch_size):
-            id_batch = market_ids[i:i + batch_size]
-            batch_num = i // batch_size
-            logger.info(f"Fetching book batch {batch_num + 1}: markets {i + 1}–{i + len(id_batch)}")
-            try:
-                books = self._call_market_book_api(id_batch)
-
-                # Validate each book record and drop any that fail schema check.
-                # runners field stays nested (Bronze layer) — flattened later in Databricks.
-                validated = [r for r in (self.validate_book(b) for b in books) if r is not None]
-
-                key = f"{book_prefix}run_time={run_time}/batch_{batch_num}.json"
-                self.upload_batch(validated, key)
-                success += len(validated)
-            except Exception as e:
-                logger.error(f"Book batch {batch_num + 1} failed after retries: {e}")
-                failed += len(id_batch)
-
-        logger.info(f"Book done | Success: {success} | Failed: {failed}")
-
-    # -------------------- DISPATCHER --------------------
-    # Routes execution to the correct run method based on --mode argument.
-    # catalogue  → morning run only (7:30 AM)
-    # book       → night run only  (11:30 PM) — reads market IDs from S3
-    # all        → both in sequence — only runs book if catalogue uploaded data
-    # Wraps everything in try/except so any unhandled crash triggers an SNS alert
-    # and re-raises the error so cron records a non-zero exit code (job failed).
+    # def run(self, mode: str, from_utc: str, to_utc: str, today: str, overwrite: bool = False, snapshot_type: str = None):
+    #     try:
+    #         if mode == "catalogue": self.run_catalogue(from_utc, to_utc, today, overwrite)
+    #         elif mode == "dynamic": self.run_dynamic(today)
+    #         elif mode == "all":
+    #             if self.run_catalogue(from_utc, to_utc, today, overwrite):
+    #                 logger.info("One-shot catalogue complete.")
+    #     except Exception as e:
+    #         msg = f"Pipeline failed | Date: {today} | Mode: {mode} | Error: {e}"
+    #         logger.error(msg)
+    #         self._send_alert(subject="Betfair Pipeline FAILED", message=msg)
+    #         raise
 
     def run(self, mode: str, from_utc: str, to_utc: str, today: str, overwrite: bool = False, snapshot_type: str = None):
         try:
-            if mode == "catalogue":
+            if mode == "catalogue": 
                 self.run_catalogue(from_utc, to_utc, today, overwrite)
-            elif mode == "book":
-                self.run_book(today, overwrite, snapshot_type)
+            
+            elif mode == "dynamic": 
+                self.run_dynamic(today)
+            
             elif mode == "all":
-                uploaded = self.run_catalogue(from_utc, to_utc, today, overwrite)
-                if uploaded:
-                    self.run_book(today, overwrite, snapshot_type)
+                # 1. Fetch the initial catalogue to ensure S3 is populated
+                if self.run_catalogue(from_utc, to_utc, today, overwrite):
+                    logger.info("Initial catalogue fetch successful. Switching to Dynamic mode...")
+                    # 2. Hand over control to the dynamic loop
+                    self.run_dynamic(today)
                 else:
-                    logger.warning("Catalogue returned 0 markets — skipping book run")
+                    logger.warning("Catalogue fetch returned no data. Dynamic mode may not have races to poll.")
+                    self.run_dynamic(today) # Still start it in case 15-min heartbeat finds data later
 
         except Exception as e:
-            # Send SNS alert so you know immediately when the overnight cron fails.
-            # re-raise after alerting so the cron job records a non-zero exit code.
             msg = f"Pipeline failed | Date: {today} | Mode: {mode} | Error: {e}"
             logger.error(msg)
-            self._send_alert(subject=f"Betfair Pipeline FAILED — {today}", message=msg)
+            self._send_alert(subject="Betfair Pipeline FAILED", message=msg)
             raise
 
 
 # -------------------- ENTRY --------------------
-# Script entry point — only runs when executed directly, not when imported.
-# Parses CLI arguments, computes the AEST date and UTC time window,
-# then hands off to the pipeline.
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(description="Betfair Racing Bronze Pipeline")
-
-    # --mode controls which part of the pipeline runs.
-    # catalogue = morning run  (7:30 AM AEST) — fetches market list
-    # book      = night run    (11:30 PM AEST) — fetches odds + BSP
-    # all       = both in sequence (used for testing or manual runs)
-    parser.add_argument(
-        "--mode",
-        choices=["catalogue", "book", "all"],
-        default="all",
-        help="catalogue=morning run | book=night run | all=both"
-    )
-
-    # --date enables backfilling — run the pipeline for any past date.
-    # Example: python script.py --mode catalogue --date 2026-05-01
-    # Defaults to today AEST when not provided.
-    parser.add_argument(
-        "--date",
-        default=None,
-        metavar="YYYY-MM-DD",
-        help="Date to process. Defaults to today AEST. Use for backfilling missed days."
-    )
-
-    # --overwrite bypasses the idempotency check and re-uploads even if
-    # data already exists in S3 for this date.
-    # Use when re-running after a partial failure or data quality fix.
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="Force re-run even if data already exists in S3 for this date."
-    )
-
-    # --snapshot-type stamps PRE_RACE or POST_RACE into the S3 path
-    # so pre-race order book and post-race BSP land in separate folders.
-    # Must be declared BEFORE parse_args() so argparse recognises the argument.
-    parser.add_argument(
-        "--snapshot-type",
-        choices=["PRE_RACE", "POST_RACE"],
-        default=None,
-        dest="snapshot_type",
-        help="PRE_RACE=afternoon book run | POST_RACE=night book run"
-    )
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["catalogue", "dynamic", "all"], default="all")
+    parser.add_argument("--date", default=None)
+    parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
     SYDNEY = ZoneInfo("Australia/Sydney")
-
-    # Build the target date and UTC window.
-    # If --date is given, parse it as an AEST date for backfilling.
-    # Otherwise default to today in AEST (handles daylight saving automatically).
-    if args.date:
-        y, m, d = int(args.date[:4]), int(args.date[5:7]), int(args.date[8:10])
-        target = datetime(y, m, d, tzinfo=SYDNEY)
-        today  = args.date
-        logger.info(f"Backfill mode — processing date: {today}")
-    else:
-        target = datetime.now(SYDNEY)
-        today  = target.strftime("%Y-%m-%d")
-
-    # Convert the full AEST race day (00:00 → 23:59) to UTC for the Betfair filter.
-    # Betfair's API only accepts UTC — ZoneInfo handles AEST/AEDT offset automatically.
-    day_start = target.replace(hour=0,  minute=0,  second=0,  microsecond=0).astimezone(timezone.utc)
-    day_end   = target.replace(hour=23, minute=59, second=59, microsecond=0).astimezone(timezone.utc)
-    from_utc  = day_start.strftime("%Y-%m-%dT%H:%M:%SZ")
-    to_utc    = day_end.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    logger.info(
-        f"Mode: {args.mode} | Date: {today} AEST | "
-        f"UTC: {from_utc} → {to_utc} | Overwrite: {args.overwrite}"
-    )
-
-    # Initialise the pipeline (connects to S3, SNS, logs in to Betfair)
-    # then dispatch to the correct run method based on --mode.
+    target = datetime.strptime(args.date, "%Y-%m-%d").replace(tzinfo=SYDNEY) if args.date else datetime.now(SYDNEY)
+    today = target.strftime("%Y-%m-%d")
+    
+    day_start = target.replace(hour=0, minute=0, second=0).astimezone(timezone.utc)
+    day_end = target.replace(hour=23, minute=59, second=59).astimezone(timezone.utc)
+    
     pipeline = BetfairPipeline(config)
-    pipeline.run(args.mode, from_utc, to_utc, today, args.overwrite, args.snapshot_type)
+    pipeline.run(args.mode, day_start.strftime("%Y-%m-%dT%H:%M:%SZ"), day_end.strftime("%Y-%m-%dT%H:%M:%SZ"), today, args.overwrite)
