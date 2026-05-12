@@ -103,6 +103,13 @@ class MarketBook(BaseModel):
     runnersVoidable: Optional[bool] = None
     version: Optional[int] = None
     complete: Optional[bool] = None
+    
+    # --- NEW METADATA FIELDS ---
+    # Becomes your "primary key" for 'Latest State' logic in dbt
+    ingested_at: Optional[str] = None 
+    
+    # Measures the health/speed of the Betfair API connection
+    api_latency_ms: Optional[int] = None
 
 
 # -------------------- PIPELINE CLASS --------------------
@@ -127,6 +134,9 @@ class BetfairPipeline:
             if config.sns_topic_arn else None
         )
         self.token = self._get_session_token()
+        # --- NEW STATE TRACKERS ---
+        self.metrics = {"total_snapshots": 0, "api_errors": 0, "start_time": datetime.now()}
+        self.pending_schedule = [] 
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=10))
     def _get_session_token(self) -> str:
@@ -216,9 +226,20 @@ class BetfairPipeline:
         try: return MarketCatalogue(**record).model_dump()
         except ValidationError: return None
 
+    # def validate_book(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    #     try: return MarketBook(**record).model_dump()
+    #     except ValidationError: return None
+
     def validate_book(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        try: return MarketBook(**record).model_dump()
-        except ValidationError: return None
+        # Add this check to ensure the record is a dictionary
+        if not isinstance(record, dict):
+            logger.warning(f"Skipping record: Expected dict but got {type(record)}. Value: {record}")
+            return None
+        try: 
+            return MarketBook(**record).model_dump()
+        except ValidationError as e: 
+            logger.error(f"Pydantic validation error: {e}")
+            return None
 
     def batch_records(self, iterator: Iterator[Dict[str, Any]], batch_size: int = 50):
         batch = []
@@ -284,63 +305,56 @@ class BetfairPipeline:
             schedule.append((dt, trigger, groups[dt], aest))
         return schedule
 
+    # 
+    
     def run_dynamic(self, today: str):
-        POLL_INTERVAL = 15
-        MAX_DURATION = timedelta(minutes=15)
+        MAX_DURATION = timedelta(minutes=20)  # Safety buffer to catch final results
+        last_catalogue_refresh = datetime.min.replace(tzinfo=timezone.utc)
         processed_market_ids = set()
 
+        logger.info("Starting Separated Ingestion Engine (Discovery + Capture)")
+
         while True:
-            logger.info("Refreshing catalogue...")
-            now_refresh = datetime.now(timezone.utc)
-            refresh_to = (now_refresh + timedelta(days=1)).replace(hour=0, minute=0, second=0)
-            self.run_catalogue(now_refresh.strftime("%Y-%m-%dT%H:%M:%SZ"), refresh_to.strftime("%Y-%m-%dT%H:%M:%SZ"), today, overwrite=True)
-            
-            full_schedule = self.load_schedule_from_s3(today)
-            active_schedule = [item for item in full_schedule if item[0] > datetime.now(timezone.utc) and not any(mid in processed_market_ids for mid in item[2])]
+            now = datetime.now(timezone.utc)
 
-            if not active_schedule:
-                logger.info("No races found. Sleeping 10 mins...")
-                time.sleep(600)
-                continue
-
-            start_time, trigger_time, market_ids, aest_str = active_schedule[0]
-            wait_secs = (trigger_time - datetime.now(timezone.utc)).total_seconds()
-            # if wait_secs > 0:
-            #     logger.info(f"Waiting {wait_secs/60:.1f} min for {aest_str} AEST")
-            #     time.sleep(wait_secs)
-            if wait_secs > 0:
-                # HEARTBEAT: Sleep for 15 mins (900s) max at a time.
-                # This forces the loop to restart and refresh the catalogue 
-                # even if the next race is hours away.
-                sleep_chunk = min(wait_secs, 900) 
+            # --- LAYER 1: DISCOVERY (Every 15 mins) ---
+            if (now - last_catalogue_refresh).total_seconds() > 900:
+                logger.info("Discovery Layer: Refreshing market catalogue...")
+                refresh_to = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0)
+                self.run_catalogue(now.strftime("%Y-%m-%dT%H:%M:%SZ"), 
+                                   refresh_to.strftime("%Y-%m-%dT%H:%M:%SZ"), today, overwrite=True)
                 
-                logger.info(f"Next race at {aest_str}. Checking again in {sleep_chunk/60:.1f} min...")
-                time.sleep(sleep_chunk)
-                
-                # If we still have a long wait after this heartbeat, 
-                # 'continue' jumps back to the top of 'while True' to refresh!
-                if wait_secs > 900:
-                    continue 
+                full_schedule = self.load_schedule_from_s3(today)
+                # Filter for future races not yet processed
+                self.pending_schedule = [
+                    item for item in full_schedule 
+                    if item[0] > now and not any(mid in processed_market_ids for mid in item[2])
+                ]
+                last_catalogue_refresh = now
 
-            poll_start = datetime.now(timezone.utc)
-            while True:
-                run_time = datetime.now(self.SYDNEY).strftime("%H-%M-%S")
-                try:
-                    all_val = []
-                    for i in range(0, len(market_ids), 8):
-                        books = self._call_market_book_api(market_ids[i:i+8])
-                        all_val.extend([r for r in (self.validate_book(b) for b in books) if r is not None])
-                    if all_val:
-                        for r in all_val:
-                            r["extracted_date"], r["run_time"], r["snapshot_type"] = today, run_time, "PRE_RACE"
-                        self.upload_batch(all_val, f"betfair/market_book/extracted_date={today}/snapshot_type=PRE_RACE/run_time={run_time}/batch_0.json")
-                        if {r.get("status") for r in all_val} <= {"CLOSED"}: break
-                    if datetime.now(timezone.utc) - poll_start > MAX_DURATION: break
-                    time.sleep(POLL_INTERVAL)
-                except Exception as e:
-                    logger.error(f"Poll error: {e}"); time.sleep(POLL_INTERVAL)
-            
-            for mid in market_ids: processed_market_ids.add(mid)
+            # --- LAYER 2: CAPTURE (The Orchestrator) ---
+            # Sort to ensure we handle the earliest races first
+            self.pending_schedule.sort(key=lambda x: x[0])
+
+            found_race_to_poll = False
+            for item in self.pending_schedule[:]:
+                start_time, trigger_time, market_ids, aest_str = item
+                
+                if now >= trigger_time:
+                    # Execute the worker for this specific race group
+                    self.execute_poll_worker(market_ids, today, MAX_DURATION, aest_str)
+                    
+                    # Mark as processed and remove from pending
+                    for mid in market_ids: processed_market_ids.add(mid)
+                    self.pending_schedule.remove(item)
+                    found_race_to_poll = True
+                    break # Return to top of loop to re-check time/catalogue
+
+            if not found_race_to_poll:
+                # System Health Monitoring Log
+                uptime = datetime.now() - self.metrics["start_time"]
+                logger.info(f"HEALTH: {self.metrics['total_snapshots']} records saved | Uptime: {uptime}")
+                time.sleep(30) # Heartbeat
 
     # def run(self, mode: str, from_utc: str, to_utc: str, today: str, overwrite: bool = False, snapshot_type: str = None):
     #     try:
@@ -354,7 +368,55 @@ class BetfairPipeline:
     #         logger.error(msg)
     #         self._send_alert(subject="Betfair Pipeline FAILED", message=msg)
     #         raise
+    def execute_poll_worker(self, market_ids: List[str], today: str, max_duration: timedelta, aest_label: str):
+        poll_start = datetime.now(timezone.utc)
+        poll_count = 0
+        logger.info(f"Capture Layer: Starting T-5 poll for {aest_label}")
 
+        while (datetime.now(timezone.utc) - poll_start) < max_duration:
+            run_time = datetime.now(self.SYDNEY).strftime("%H-%M-%S")
+            api_start = time.time()
+            
+            try:
+                books = self._call_market_book_api(market_ids)
+                latency = int((time.time() - api_start) * 1000)
+                
+                valid_books = []
+                if isinstance(books, list):
+                    for b in books:
+                        validated = self.validate_book(b)
+                        if validated:
+                            # POINT 2 & 5: Append-Only Metadata & Metrics
+                            validated["ingested_at"] = datetime.now(timezone.utc).isoformat()
+                            validated["api_latency_ms"] = latency
+                            # Carry over metadata for partitioning
+                            validated["extracted_date"] = today
+                            validated["run_time"] = run_time
+                            validated["snapshot_type"] = "PRE_RACE"
+                            valid_books.append(validated)
+
+                if valid_books:
+                    # Uploading as a unique batch per poll (Append-only)
+                    key = f"betfair/market_book/extracted_date={today}/snapshot_type=PRE_RACE/run_time={run_time}/batch_{poll_count}.json"
+                    self.upload_batch(valid_books, key)
+                    
+                    self.metrics["total_snapshots"] += len(valid_books)
+                    poll_count += 1
+
+                    # POINT 4: Exit based on confirmed data status
+                    if all(b.get("status") == "CLOSED" for b in valid_books):
+                        logger.info(f"Capture Layer: {aest_label} confirmed CLOSED. Ending poll.")
+                        break
+                
+                time.sleep(15) 
+
+            except Exception as e:
+                self.metrics["api_errors"] += 1
+                logger.error(f"Poll Worker Error ({aest_label}): {e}")
+                time.sleep(15)
+
+                
+                    
     def run(self, mode: str, from_utc: str, to_utc: str, today: str, overwrite: bool = False, snapshot_type: str = None):
         try:
             if mode == "catalogue": 
