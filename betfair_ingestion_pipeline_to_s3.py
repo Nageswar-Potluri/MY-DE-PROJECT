@@ -5,6 +5,7 @@ import logging
 import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+import datetime
 from zoneinfo import ZoneInfo
 from typing import Iterator, Dict, Any, Optional, List
 
@@ -374,6 +375,12 @@ class BetfairPipeline:
         logger.info(f"Capture Layer: Starting T-5 poll for {aest_label}")
 
         while (datetime.now(timezone.utc) - poll_start) < max_duration:
+            current_sydney_time = datetime.datetime.now(self.SYDNEY).time()
+            if current_sydney_time > datetime.time(23, 0): # Hard stop at 11 PM
+                logger.info("Hard stop reached for the day. Terminating Fargate task.")
+                break
+
+
             run_time = datetime.now(self.SYDNEY).strftime("%H-%M-%S")
             api_start = time.time()
             
