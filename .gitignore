@@ -1,14 +1,50 @@
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+.venv312/
+dbt-env/
+
+# Credentials & secrets
 .env
 *.env
 *.ENV
-.venv/
-__pycache__/
+betfair_credits.env
+aws_s3.env
+
+# macOS
+.DS_Store
+
+# IDEs
 .idea/
 *.iml
-*.csv
-__pycache__/
-.venv/
-*.env
-*.ENV
+*.code-workspace
+.vscode/mcp.json
 
+# Data files
+*.csv
+*.pkg
+targets.json
+
+# Logs
+logs/
+
+# Databricks
 .databricks
+databricks.yml
+
+# Poetry
+poetry.lock
+
+# Python version file
+.python-version
+
+# Docker (local only)
+docker-compose.yaml
