@@ -184,7 +184,7 @@ class BetfairPipeline:
                 "EVENT", "MARKET_START_TIME", "RUNNER_DESCRIPTION",
                 "EVENT_TYPE", "COMPETITION", "MARKET_DESCRIPTION",
             ],
-            "maxResults": "200",
+            "maxResults": "1000",
             "sort": "FIRST_TO_START",
         }
         response = requests.post(
@@ -236,7 +236,7 @@ class BetfairPipeline:
         payload = {
             "marketIds": market_ids,
             "priceProjection": {
-                "priceData": ["EX_BEST_OFFERS", "EX_TRADED", "SP_TRADED"],
+                "priceData": ["EX_BEST_OFFERS", "EX_TRADED", "SP_TRADED", "SP_AVAILABLE"],
                 "virtualise": False,
             },
         }
@@ -245,7 +245,11 @@ class BetfairPipeline:
             json=payload, headers=headers, timeout=30,
         )
         self._handle_session_error(response)
-        return response.json()
+        result = response.json()
+        if not isinstance(result, list):
+            logger.error(f"listMarketBook unexpected response: {result}")
+            return []
+        return result
 
     def validate_catalogue(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         try:
@@ -253,6 +257,14 @@ class BetfairPipeline:
         except ValidationError as e:
             logger.error(f"Catalogue validation error: {e}")
             return None
+
+    def _derive_snapshot_type(self, book: Dict[str, Any]) -> str:
+        runners = book.get("runners") or []
+        if any(r.get("status") in ("WINNER", "LOSER") for r in runners):
+            return "POST_RACE"
+        if book.get("inplay"):
+            return "ONGOING"
+        return "PRE_RACE"
 
     def validate_book(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not isinstance(record, dict):
@@ -306,17 +318,21 @@ class BetfairPipeline:
         logger.info(f"Loading schedule from S3 for {today}")
         prefix = f"betfair/market_catalogue/extracted_date={today}/"
         try:
-            res = self.s3.list_objects_v2(Bucket=self.config.s3_bucket, Prefix=prefix)
-            if "Contents" not in res:
-                return []
+            paginator   = self.s3.get_paginator("list_objects_v2")
             all_markets = []
-            for obj in res["Contents"]:
-                if not obj["Key"].endswith(".json"):
-                    continue
-                f = self.s3.get_object(Bucket=self.config.s3_bucket, Key=obj["Key"])
-                for line in f["Body"].read().decode("utf-8").strip().splitlines():
-                    all_markets.append(json.loads(line))
-            unique_markets = {m["market_id"]: m for m in all_markets}.values()
+            for page in paginator.paginate(Bucket=self.config.s3_bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    if not obj["Key"].endswith(".json"):
+                        continue
+                    f = self.s3.get_object(Bucket=self.config.s3_bucket, Key=obj["Key"])
+                    for line in f["Body"].read().decode("utf-8").strip().splitlines():
+                        try:
+                            all_markets.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+            if not all_markets:
+                return []
+            unique_markets = {m["market_id"]: m for m in all_markets if m.get("market_id")}.values()
             return self._group_and_format(list(unique_markets))
         except Exception as e:
             logger.error(f"Schedule load failed: {e}")
@@ -336,17 +352,17 @@ class BetfairPipeline:
             schedule.append((dt, trigger, groups[dt], aest))
         return schedule
 
-    def run_dynamic(self, today: str, to_utc: str):
+    def run_dynamic(self, today: str, from_utc: str, to_utc: str):
         """
         Single-threaded event loop — one listMarketBook API call per tick covers
         ALL active markets simultaneously.
 
-        Worst case: 10-12 races running late at the same time
-          → still exactly 1 API call per 15 s (Betfair supports up to 40 market IDs)
-          → zero thread overhead, zero rate-limit risk
-          → each market exits independently when status == CLOSED
+        - Catalogue always queries the full AEST day (from_utc = midnight) so no
+          morning races are missed even if the task starts or restarts late.
+        - No grace period ceiling: any race whose trigger has arrived is activated
+          immediately (CLOSED markets exit on the first poll).
+        - Catalogue refresh failures are caught and retried next cycle.
         """
-        GRACE_PERIOD               = timedelta(minutes=20)
         CATALOGUE_REFRESH_INTERVAL = timedelta(minutes=5)
         POLL_CAP                   = timedelta(minutes=60)  # safety cap per market
         POLL_INTERVAL              = 15                     # seconds between API calls
@@ -354,6 +370,7 @@ class BetfairPipeline:
         # market_id → {start_time, aest_label, poll_count, poll_start}
         active_markets: Dict[str, Dict] = {}
         processed_start_times: set      = set()
+        completed_market_ids:  set      = set()   # individual IDs that have exited (CLOSED or cap)
         schedule_cache:        List[tuple] = []
         last_refresh = datetime.min.replace(tzinfo=timezone.utc)
 
@@ -365,8 +382,8 @@ class BetfairPipeline:
                 self._log_metrics()
                 break
 
-            if datetime.now(self.SYDNEY).time() > dt_time(23, 0):
-                logger.info("Hard stop at 11 PM AEST.")
+            if datetime.now(self.SYDNEY).time() > dt_time(23, 59):
+                logger.info("Hard stop at midnight AEST.")
                 self._log_metrics()
                 break
 
@@ -374,22 +391,32 @@ class BetfairPipeline:
             run_time = datetime.now(self.SYDNEY).strftime("%H-%M-%S")
 
             # 1. REFRESH CATALOGUE + SCHEDULE every 5 min
+            #    Always uses day_start as from_utc so late restarts never miss
+            #    races that were scheduled earlier in the day.
             if (now_utc - last_refresh) >= CATALOGUE_REFRESH_INTERVAL:
-                self.run_catalogue(
-                    now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"), to_utc, today, overwrite=True
-                )
-                schedule_cache = self.load_schedule_from_s3(today)
-                last_refresh   = now_utc
+                try:
+                    ok = self.run_catalogue(from_utc, to_utc, today, overwrite=True)
+                    if not ok:
+                        logger.warning("Catalogue returned no markets — retaining cached schedule.")
+                    new_schedule = self.load_schedule_from_s3(today)
+                    if new_schedule:
+                        schedule_cache = new_schedule
+                    else:
+                        logger.warning("Schedule load returned empty — retaining cached schedule.")
+                    last_refresh = now_utc
+                except Exception as e:
+                    logger.error(f"Catalogue refresh failed: {e} — retaining cached schedule.")
 
             # 2. ACTIVATE markets whose T-5 trigger has arrived
+            #    No upper grace period — trigger_time <= now covers any late restart.
+            #    Already-CLOSED markets exit on the very first poll.
             for start_time, trigger_time, market_ids, aest_label in schedule_cache:
                 if (
                     start_time not in processed_start_times
-                    and trigger_time > (now_utc - GRACE_PERIOD)
                     and now_utc >= trigger_time
                 ):
                     for mid in market_ids:
-                        if mid not in active_markets:
+                        if mid not in active_markets and mid not in completed_market_ids:
                             active_markets[mid] = {
                                 "start_time": start_time,
                                 "aest_label": aest_label,
@@ -398,15 +425,19 @@ class BetfairPipeline:
                             }
                             logger.info(f"Activated {aest_label} → market {mid}")
 
-            # 3. ONE API CALL for all active markets
+            # 3. POLL all active markets — chunk at 10 to stay under Betfair TOO_MUCH_DATA limit
+            BETFAIR_BATCH_LIMIT = 10
             if active_markets:
                 all_ids   = list(active_markets.keys())
+                chunks    = [all_ids[i:i + BETFAIR_BATCH_LIMIT] for i in range(0, len(all_ids), BETFAIR_BATCH_LIMIT)]
                 api_start = time.time()
                 try:
-                    books   = self._call_market_book_api(all_ids)
+                    books = []
+                    for chunk in chunks:
+                        books.extend(self._call_market_book_api(chunk) or [])
                     latency = int((time.time() - api_start) * 1000)
                     logger.info(
-                        f"Polled {len(all_ids)} markets in 1 call "
+                        f"Polled {len(all_ids)} markets in {len(chunks)} call(s) "
                         f"({latency} ms) | run_time={run_time}"
                     )
 
@@ -421,7 +452,7 @@ class BetfairPipeline:
                         if validated:
                             validated["extracted_date"] = today
                             validated["run_time"]       = run_time
-                            validated["snapshot_type"]  = "PRE_RACE"
+                            validated["snapshot_type"]  = self._derive_snapshot_type(book)
                             validated["ingested_at"]    = now_utc.isoformat()
                             validated["api_latency_ms"] = latency
                             valid_books.append(validated)
@@ -430,20 +461,24 @@ class BetfairPipeline:
                         if book.get("status") == "CLOSED":
                             closed_market_ids.add(mid)
 
-                    # Upload all markets' snapshots together in one S3 file
-                    if valid_books:
+                    # Upload grouped by snapshot_type so S3 partition matches the data
+                    by_type: Dict[str, List] = {}
+                    for vb in valid_books:
+                        by_type.setdefault(vb["snapshot_type"], []).append(vb)
+                    for snap_type, records in by_type.items():
                         key = (
                             f"betfair/market_book/extracted_date={today}"
-                            f"/snapshot_type=PRE_RACE/run_time={run_time}/batch_0.json"
+                            f"/snapshot_type={snap_type}/run_time={run_time}/batch_0.json"
                         )
-                        self.upload_batch(valid_books, key)
-                        self.metrics["total_snapshots"] += len(valid_books)
+                        self.upload_batch(records, key)
+                        self.metrics["total_snapshots"] += len(records)
 
                     # Remove CLOSED markets; mark start_time done when all its markets close
                     for mid in closed_market_ids:
                         if mid not in active_markets:
                             continue
                         info = active_markets.pop(mid)
+                        completed_market_ids.add(mid)
                         st   = info["start_time"]
                         # If no markets remain for this start_time → it's fully done
                         if not any(i["start_time"] == st for i in active_markets.values()):
@@ -462,6 +497,7 @@ class BetfairPipeline:
             ]
             for mid in cap_expired:
                 info = active_markets.pop(mid)
+                completed_market_ids.add(mid)
                 self.metrics["cap_exits"] += 1
                 logger.warning(
                     f"Safety cap: {info['aest_label']} market {mid} removed after 60 min"
@@ -518,13 +554,13 @@ class BetfairPipeline:
             if mode == "catalogue":
                 self.run_catalogue(from_utc, to_utc, today, overwrite)
             elif mode == "dynamic":
-                self.run_dynamic(today, to_utc)
+                self.run_dynamic(today, from_utc, to_utc)
             elif mode == "all":
                 if self.run_catalogue(from_utc, to_utc, today, overwrite):
                     logger.info("Discovery complete. Entering dynamic execution...")
                 else:
                     logger.warning("No catalogue found. Starting dynamic mode anyway...")
-                self.run_dynamic(today, to_utc)
+                self.run_dynamic(today, from_utc, to_utc)
         except Exception as e:
             msg = f"Pipeline failed | Date: {today} | Mode: {mode} | Error: {e}"
             logger.error(msg)
