@@ -4,6 +4,7 @@ import time
 import signal
 import logging
 import argparse
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from datetime import time as dt_time
@@ -35,16 +36,16 @@ signal.signal(signal.SIGTERM, _handle_sigterm)
 # -------------------- CONFIG --------------------
 @dataclass(frozen=True)
 class BetfairConfig:
-    api_key:       str
-    login_url:     str
-    username:      str
-    password:      str
-    api_url:       str
-    s3_bucket:     str
+    api_key:        str
+    login_url:      str
+    username:       str
+    password:       str
+    api_url:        str
+    s3_bucket:      str
     aws_access_key: str
     aws_secret_key: str
-    region:        str = "ap-southeast-2"
-    sns_topic_arn: Optional[str] = None
+    region:         str = "ap-southeast-2"
+    sns_topic_arn:  Optional[str] = None
 
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "betfair_credits.env"))
@@ -195,8 +196,14 @@ class BetfairPipeline:
 
     def fetch_markets(self, from_utc: str, to_utc: str) -> Iterator[Dict[str, Any]]:
         markets = self._call_market_catalogue_api(from_utc, to_utc)
-        logger.info(f"Fetched {len(markets)} markets")
-        for market in markets:
+        logger.info(f"Fetched {len(markets)} markets from API")
+        harness = [
+            m for m in markets
+            if "pace" in (m.get("marketName") or "").lower()
+            or "trot" in (m.get("marketName") or "").lower()
+        ]
+        logger.info(f"Filtered to {len(harness)} harness markets (Pace/Trot) from {len(markets)} total")
+        for market in harness:
             yield {
                 "market_id":         market.get("marketId"),
                 "market_name":       market.get("marketName"),
@@ -316,7 +323,6 @@ class BetfairPipeline:
             return []
 
     def _group_and_format(self, markets: List[Dict]) -> List[tuple]:
-        from collections import defaultdict
         groups = defaultdict(list)
         for m in markets:
             st = m.get("market_start_time")
@@ -332,124 +338,160 @@ class BetfairPipeline:
 
     def run_dynamic(self, today: str, to_utc: str):
         """
-        Continuous discovery loop.
-        - Refreshes catalogue before every race using the correct end-of-AEST-day window.
-        - Waits until T-5 per race group, polls until CLOSED, then moves to next.
-        - Terminates cleanly when no upcoming races remain or SIGTERM received.
+        Single-threaded event loop — one listMarketBook API call per tick covers
+        ALL active markets simultaneously.
+
+        Worst case: 10-12 races running late at the same time
+          → still exactly 1 API call per 15 s (Betfair supports up to 40 market IDs)
+          → zero thread overhead, zero rate-limit risk
+          → each market exits independently when status == CLOSED
         """
-        logger.info(f"Dynamic Mode: Starting continuous discovery for {today}")
+        GRACE_PERIOD               = timedelta(minutes=20)
+        CATALOGUE_REFRESH_INTERVAL = timedelta(minutes=5)
+        POLL_CAP                   = timedelta(minutes=60)  # safety cap per market
+        POLL_INTERVAL              = 15                     # seconds between API calls
+
+        # market_id → {start_time, aest_label, poll_count, poll_start}
+        active_markets: Dict[str, Dict] = {}
+        processed_start_times: set      = set()
+        schedule_cache:        List[tuple] = []
+        last_refresh = datetime.min.replace(tzinfo=timezone.utc)
+
+        logger.info(f"Dynamic Mode: Single-loop engine started for {today}")
 
         while True:
             if _shutdown:
-                logger.info("Shutdown signal received. Exiting cleanly.")
-                break
-
-            # 1. REFRESH CATALOGUE — use now → end-of-AEST-day (to_utc) as the window
-            now_utc = datetime.now(timezone.utc)
-            self.run_catalogue(
-                now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                to_utc,
-                today,
-                overwrite=True,
-            )
-
-            # 2. FILTER — upcoming races only (2-min grace for already-triggered groups)
-            full_schedule  = self.load_schedule_from_s3(today)
-            active_schedule = [
-                item for item in full_schedule
-                if item[1] > (datetime.now(timezone.utc) - timedelta(minutes=2))
-            ]
-
-            # 3. TERMINATION
-            if not active_schedule:
-                logger.info("FINISHED: No more upcoming races. Closing pipeline for the day.")
+                logger.info("Shutdown received.")
                 self._log_metrics()
                 break
 
-            # 4. WAIT for T-5 of the next race group
-            start_time, trigger_time, market_ids, aest_label = active_schedule[0]
-            wait_secs = (trigger_time - datetime.now(timezone.utc)).total_seconds()
-            if wait_secs > 0:
-                logger.info(f"Next race: {aest_label} AEST — waiting {wait_secs / 60:.1f} min...")
-                time.sleep(wait_secs)
-
-            # 5. CAPTURE — poll until CLOSED or 15-min cap
-            closed_clean = self.execute_poll_worker(
-                market_ids, today, timedelta(minutes=15), aest_label
-            )
-            if not closed_clean:
-                logger.warning(
-                    f"{aest_label}: exited via cap or shutdown — CLOSED not confirmed. "
-                    "Continuing to next race."
-                )
-
-    def execute_poll_worker(
-        self,
-        market_ids:   List[str],
-        today:        str,
-        max_duration: timedelta,
-        aest_label:   str,
-    ) -> bool:
-        """
-        Polls listMarketBook every 15 s until all markets are CLOSED.
-        Returns True on clean CLOSED exit, False on cap / SIGTERM / hard-stop.
-        """
-        poll_start  = datetime.now(timezone.utc)
-        poll_count  = 0
-        logger.info(f"Capture Layer: Starting T-5 poll for {aest_label}")
-
-        while (datetime.now(timezone.utc) - poll_start) < max_duration:
-            if _shutdown:
-                logger.info(f"Shutdown during poll for {aest_label}.")
-                return False
-
             if datetime.now(self.SYDNEY).time() > dt_time(23, 0):
-                logger.info("Hard stop at 11 PM AEST reached.")
-                return False
+                logger.info("Hard stop at 11 PM AEST.")
+                self._log_metrics()
+                break
 
-            run_time  = datetime.now(self.SYDNEY).strftime("%H-%M-%S")
-            api_start = time.time()
+            now_utc  = datetime.now(timezone.utc)
+            run_time = datetime.now(self.SYDNEY).strftime("%H-%M-%S")
 
-            try:
-                books   = self._call_market_book_api(market_ids)
-                latency = int((time.time() - api_start) * 1000)
+            # 1. REFRESH CATALOGUE + SCHEDULE every 5 min
+            if (now_utc - last_refresh) >= CATALOGUE_REFRESH_INTERVAL:
+                self.run_catalogue(
+                    now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"), to_utc, today, overwrite=True
+                )
+                schedule_cache = self.load_schedule_from_s3(today)
+                last_refresh   = now_utc
 
-                valid_books = []
-                if isinstance(books, list):
-                    for b in books:
-                        validated = self.validate_book(b)
+            # 2. ACTIVATE markets whose T-5 trigger has arrived
+            for start_time, trigger_time, market_ids, aest_label in schedule_cache:
+                if (
+                    start_time not in processed_start_times
+                    and trigger_time > (now_utc - GRACE_PERIOD)
+                    and now_utc >= trigger_time
+                ):
+                    for mid in market_ids:
+                        if mid not in active_markets:
+                            active_markets[mid] = {
+                                "start_time": start_time,
+                                "aest_label": aest_label,
+                                "poll_count": 0,
+                                "poll_start": now_utc,
+                            }
+                            logger.info(f"Activated {aest_label} → market {mid}")
+
+            # 3. ONE API CALL for all active markets
+            if active_markets:
+                all_ids   = list(active_markets.keys())
+                api_start = time.time()
+                try:
+                    books   = self._call_market_book_api(all_ids)
+                    latency = int((time.time() - api_start) * 1000)
+                    logger.info(
+                        f"Polled {len(all_ids)} markets in 1 call "
+                        f"({latency} ms) | run_time={run_time}"
+                    )
+
+                    valid_books      = []
+                    closed_market_ids = set()
+
+                    for book in (books if isinstance(books, list) else []):
+                        mid = book.get("marketId")
+                        if mid not in active_markets:
+                            continue
+                        validated = self.validate_book(book)
                         if validated:
-                            validated["ingested_at"]    = datetime.now(timezone.utc).isoformat()
-                            validated["api_latency_ms"] = latency
                             validated["extracted_date"] = today
                             validated["run_time"]       = run_time
                             validated["snapshot_type"]  = "PRE_RACE"
+                            validated["ingested_at"]    = now_utc.isoformat()
+                            validated["api_latency_ms"] = latency
                             valid_books.append(validated)
+                            active_markets[mid]["poll_count"] += 1
 
-                if valid_books:
-                    key = (
-                        f"betfair/market_book/extracted_date={today}"
-                        f"/snapshot_type=PRE_RACE/run_time={run_time}/batch_{poll_count}.json"
-                    )
-                    self.upload_batch(valid_books, key)
-                    self.metrics["total_snapshots"] += len(valid_books)
-                    poll_count += 1
+                        if book.get("status") == "CLOSED":
+                            closed_market_ids.add(mid)
 
-                    if all(b.get("status") == "CLOSED" for b in valid_books):
-                        logger.info(f"Capture Layer: {aest_label} confirmed CLOSED.")
-                        self.metrics["clean_exits"] += 1
-                        return True
+                    # Upload all markets' snapshots together in one S3 file
+                    if valid_books:
+                        key = (
+                            f"betfair/market_book/extracted_date={today}"
+                            f"/snapshot_type=PRE_RACE/run_time={run_time}/batch_0.json"
+                        )
+                        self.upload_batch(valid_books, key)
+                        self.metrics["total_snapshots"] += len(valid_books)
 
-                time.sleep(15)
+                    # Remove CLOSED markets; mark start_time done when all its markets close
+                    for mid in closed_market_ids:
+                        if mid not in active_markets:
+                            continue
+                        info = active_markets.pop(mid)
+                        st   = info["start_time"]
+                        # If no markets remain for this start_time → it's fully done
+                        if not any(i["start_time"] == st for i in active_markets.values()):
+                            processed_start_times.add(st)
+                            self.metrics["clean_exits"] += 1
+                            logger.info(f"{info['aest_label']} fully CLOSED ✓")
 
-            except Exception as e:
-                self.metrics["api_errors"] += 1
-                logger.error(f"Poll Worker Error ({aest_label}): {e}")
-                time.sleep(15)
+                except Exception as e:
+                    self.metrics["api_errors"] += 1
+                    logger.error(f"Poll error: {e}")
 
-        logger.warning(f"{aest_label}: 15-min cap reached without CLOSED confirmation.")
-        self.metrics["cap_exits"] += 1
-        return False
+            # 4. SAFETY CAP — remove any market polling longer than 60 min
+            cap_expired = [
+                mid for mid, info in active_markets.items()
+                if (now_utc - info["poll_start"]) > POLL_CAP
+            ]
+            for mid in cap_expired:
+                info = active_markets.pop(mid)
+                self.metrics["cap_exits"] += 1
+                logger.warning(
+                    f"Safety cap: {info['aest_label']} market {mid} removed after 60 min"
+                )
+                st = info["start_time"]
+                if not any(i["start_time"] == st for i in active_markets.values()):
+                    processed_start_times.add(st)
+
+            # 5. STATUS
+            future = [
+                item for item in schedule_cache
+                if item[1] > now_utc
+                and item[0] not in processed_start_times
+                and not any(i["start_time"] == item[0] for i in active_markets.values())
+            ]
+            if active_markets:
+                labels = {info["aest_label"] for info in active_markets.values()}
+                nxt    = future[0][3] if future else "none"
+                logger.info(f"Active: {sorted(labels)} | Next trigger: {nxt}")
+            elif future:
+                wait = (future[0][1] - now_utc).total_seconds()
+                logger.info(f"Idle — next: {future[0][3]} AEST in {wait / 60:.1f} min")
+
+            # 6. TERMINATION
+            if not active_markets and not future:
+                logger.info("FINISHED: All races complete. Closing pipeline for the day.")
+                self._log_metrics()
+                break
+
+            time.sleep(POLL_INTERVAL)
 
     def _log_metrics(self):
         elapsed = datetime.now(timezone.utc) - self.metrics["start_time"]
