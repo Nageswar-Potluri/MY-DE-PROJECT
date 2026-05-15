@@ -1,0 +1,91 @@
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+.venv312/
+dbt-env/
+
+# Credentials & secrets
+.env
+*.env
+*.ENV
+betfair_credits.env
+aws_s3.env
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+*.iml
+*.code-workspace
+.vscode/mcp.json
+
+# Data files
+*.csv
+*.pkg
+targets.json
+
+# Logs
+logs/
+
+# Databricks
+.databricks
+databricks.yml
+
+# Poetry
+poetry.lock
+
+# Python version file
+.python-version
+
+# Docker (local only)
+docker-compose.yaml
+docker/
+
+# Other scripts (not part of main pipeline)
+Harness_Race.py
+auto_silver.py
+autoloader.py
+formfav_api_to_s3_bronze.py
+formfav_ingestion_pipeline_to_s3 copy.py
+formfav_s3_convert_to_ndjson.py
+formfav_terminal_view.py
+postgres_to_s3_bronze.py
+s3_setup.py
+scrape_gear_changes.py
+scrape_scratchings.py
+tracks.py
+generate_customer_tables.py
+postgres_env.py
+spark_test.py
+practice.py
+test.py
+test_conncetion.py
+PY.py
+Databrick_connect.py
+Databricks_connect.py
+
+# Project folders (local only)
+config/
+dags/
+extractors/
+practice/
+racing_dbt/
+jaffle_shop_1/
+jaffle_shop_2/
+
+# Misc local files
+Architecture_Diagram.svg
+CLAUDE.md
+LocalServer.session.sql
+ecs-trust-policy.json
+trust-policy.json
+pyproject.toml

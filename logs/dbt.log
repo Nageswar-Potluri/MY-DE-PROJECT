@@ -1,0 +1,331 @@
+==================== 2026-05-04T04:42:50.731964Z | 019df14b-cfe0-7040-b891-9a89d2b8cf7b ====================
+04:42:50.733827 [info ]: Installing dbt project and profile setup
+04:42:50.738407 [info ]: Info Created .vscode/extensions.json with dbt extension recommendation
+04:42:50.739529 [info ]: Success Project created successfully!
+04:42:50.739562 [info ]: Info Project name: jaffle_shop
+04:42:50.739580 [info ]: Info Project directory: jaffle_shop
+04:42:50.739597 [info ]: Info Setting up your profile...
+04:42:50.741928 [info ]: Loading ~/.dbt/profiles.yml
+04:42:50.747238 [info ]: Info Creating new profile...
+04:42:57.542239 [info ]: No dbt_cloud.yml found - proceeding without cloud pre-population
+04:55:17.145328 [info ]: Success Profile written to /Users/nageswarchowdarypotluri/.dbt/profiles.yml
+04:55:17.146480 [info ]: Validating profile inputs, adapters, and connection
+
+04:55:17.146736 [info ]: dbt-fusion 2.0.0-preview.173
+04:55:17.151485 [info ]: Started loading project
+04:55:17.169679 [info ]: Loading ~/.dbt/profiles.yml
+04:55:17.176374 [info ]: Finished loading project [  0.02s]
+04:55:17.177203 [info ]: Started debugging
+04:55:17.177269 [info ]: Debugging profile: dev
+04:55:17.177289 [info ]: Debugging dbt version: 2.0.0-preview.173
+04:55:17.177301 [info ]: Debugging platform: macos aarch64 (unix)
+04:55:17.177581 [info ]: Debugging adapter type: databricks (remote)
+04:55:17.189824 [info ]: Debugging dependencies:
+  git: OK
+04:55:17.191885 [info ]: Debugging connection:
+  "schema": "gold",
+  "host": "a4ed19c9-d332-44ab-8b91-84b2d9ba5077",
+  "http_path": "/sql/1.0/warehouses/bc034d630d4fc44b"
+04:55:19.435009 [info ]: Finished debugging [  2.26s]
+04:55:19.435796 [error]: dbt1011: dbt was unable to connect to the specified database.
+The following error was returned:
+
+failed to initialize authenticator: unhandled cloud type: Unknown
+
+Check your database credentials and try again. For more information, visit:
+https://docs.getdbt.com/docs/core/connect-data-platform/connection-profiles
+04:55:20.248943 [info ]: New version available 2.0.0-preview.175 (run `dbt system update`)
+04:55:20.298910 [info ]: 
+==================== Execution Summary =====================
+Finished 'init' with 1 error for target 'dev' [12m 30s]
+==================== 2026-05-04T04:55:36.794801Z | 019df157-8059-77c2-8e36-91cc8d338ec3 ====================
+04:55:36.794898 [info ]: Installing dbt project and profile setup
+04:55:36.795026 [info ]: Warning Directory 'jaffle_shop' already exists, using 'jaffle_shop_1' instead
+04:55:36.798075 [info ]: Info Created .vscode/extensions.json with dbt extension recommendation
+04:55:36.798120 [info ]: Success Project created successfully!
+04:55:36.798131 [info ]: Info Project name: jaffle_shop_1
+04:55:36.798144 [info ]: Info Project directory: jaffle_shop_1
+04:55:36.798157 [info ]: Info Setting up your profile...
+04:55:36.798296 [info ]: Loading ~/.dbt/profiles.yml
+04:55:36.798667 [info ]: Info Creating new profile...
+04:55:38.710960 [info ]: No dbt_cloud.yml found - proceeding without cloud pre-population
+04:59:05.709502 [info ]: Success Profile written to /Users/nageswarchowdarypotluri/.dbt/profiles.yml
+04:59:05.709647 [info ]: Validating profile inputs, adapters, and connection
+
+04:59:05.709679 [info ]: dbt-fusion 2.0.0-preview.173
+04:59:05.709941 [info ]: Started loading project
+04:59:05.711814 [info ]: Loading ~/.dbt/profiles.yml
+04:59:05.712898 [info ]: Finished loading project [  0.00s]
+04:59:05.712995 [info ]: Started debugging
+04:59:05.713042 [info ]: Debugging profile: dev
+04:59:05.713069 [info ]: Debugging dbt version: 2.0.0-preview.173
+04:59:05.713084 [info ]: Debugging platform: macos aarch64 (unix)
+04:59:05.713105 [info ]: Debugging adapter type: databricks (remote)
+04:59:05.733363 [info ]: Debugging dependencies:
+  git: OK
+04:59:05.733479 [info ]: Debugging connection:
+  "schema": "gold",
+  "host": "a4ed19c9-d332-44ab-8b91-84b2d9ba5077",
+  "http_path": "/sql/1.0/warehouses/bc034d630d4fc44b"
+04:59:05.770946 [info ]: Finished debugging [  0.06s]
+04:59:05.771373 [error]: dbt1011: dbt was unable to connect to the specified database.
+The following error was returned:
+
+failed to ping database: databricks: request error: error connecting: host=a4ed19c9-d332-44ab-8b91-84b2d9ba5077 port=443, httpPath=/sql/1.0/warehouses/bc034d630d4fc44b: databricks: request error: open session request error: Post "https://a4ed19c9-d332-44ab-8b91-84b2d9ba5077:443/sql/1.0/warehouses/bc034d630d4fc44b": request error after 1 attempt(s): Post "https://a4ed19c9-d332-44ab-8b91-84b2d9ba5077:443/sql/1.0/warehouses/bc034d630d4fc44b": net/http: invalid header field value for "Authorization"
+
+Check your database credentials and try again. For more information, visit:
+https://docs.getdbt.com/docs/core/connect-data-platform/connection-profiles
+04:59:06.677844 [info ]: New version available 2.0.0-preview.175 (run `dbt system update`)
+04:59:06.729859 [info ]: 
+==================== Execution Summary =====================
+Finished 'init' with 1 error for target 'dev' [3m 30s]
+==================== 2026-05-04T04:59:14.650231Z | 019df15a-d359-7c42-9e10-7a1ca9593c3b ====================
+04:59:14.650334 [info ]: Installing dbt project and profile setup
+04:59:14.650479 [info ]: Warning Directory 'jaffle_shop' already exists, using 'jaffle_shop_2' instead
+04:59:14.653896 [info ]: Info Created .vscode/extensions.json with dbt extension recommendation
+04:59:14.653940 [info ]: Success Project created successfully!
+04:59:14.653952 [info ]: Info Project name: jaffle_shop_2
+04:59:14.653965 [info ]: Info Project directory: jaffle_shop_2
+04:59:14.653979 [info ]: Info Setting up your profile...
+04:59:14.654120 [info ]: Loading ~/.dbt/profiles.yml
+04:59:14.654530 [info ]: Info Creating new profile...
+04:59:16.904422 [info ]: No dbt_cloud.yml found - proceeding without cloud pre-population
+05:00:14.550869 [info ]: Success Profile written to /Users/nageswarchowdarypotluri/.dbt/profiles.yml
+05:00:14.551055 [info ]: Validating profile inputs, adapters, and connection
+
+05:00:14.551112 [info ]: dbt-fusion 2.0.0-preview.173
+05:00:14.551420 [info ]: Started loading project
+05:00:14.553459 [info ]: Loading ~/.dbt/profiles.yml
+05:00:14.555309 [info ]: Finished loading project [  0.00s]
+05:00:14.556008 [info ]: Started debugging
+05:00:14.556107 [info ]: Debugging profile: dev
+05:00:14.556247 [info ]: Debugging dbt version: 2.0.0-preview.173
+05:00:14.556290 [info ]: Debugging platform: macos aarch64 (unix)
+05:00:14.556315 [info ]: Debugging adapter type: databricks (remote)
+05:00:14.572049 [info ]: Debugging dependencies:
+  git: OK
+05:00:14.572158 [info ]: Debugging connection:
+  "schema": "gold",
+  "host": "a4ed19c9-d332-44ab-8b91-84b2d9ba5077",
+  "http_path": "/sql/1.0/warehouses/bc034d630d4fc44b"
+05:00:14.675618 [info ]: Finished debugging [  0.12s]
+05:00:14.675947 [error]: dbt1011: dbt was unable to connect to the specified database.
+The following error was returned:
+
+failed to ping database: databricks: request error: error connecting: host=a4ed19c9-d332-44ab-8b91-84b2d9ba5077 port=443, httpPath=/sql/1.0/warehouses/bc034d630d4fc44b: databricks: request error: open session request error: Post "https://a4ed19c9-d332-44ab-8b91-84b2d9ba5077:443/sql/1.0/warehouses/bc034d630d4fc44b": request error after 1 attempt(s): Post "https://a4ed19c9-d332-44ab-8b91-84b2d9ba5077:443/sql/1.0/warehouses/bc034d630d4fc44b": dial tcp: lookup a4ed19c9-d332-44ab-8b91-84b2d9ba5077: no such host
+
+Check your database credentials and try again. For more information, visit:
+https://docs.getdbt.com/docs/core/connect-data-platform/connection-profiles
+05:00:15.470813 [info ]: New version available 2.0.0-preview.175 (run `dbt system update`)
+05:00:15.498995 [info ]: 
+==================== Execution Summary =====================
+Finished 'init' with 1 error for target 'dev' [1m]
+[0m15:01:14.921966 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x1065b0e90>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10662e310>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10662eb10>]}
+
+
+============================== 15:01:14.924066 | 44fb2110-3b6e-4a90-ae38-457dc0f7fdfc ==============================
+[0m15:01:14.924066 [info ] [MainThread]: Running with dbt=1.11.6
+[0m15:01:14.924325 [debug] [MainThread]: running dbt with arguments {'log_format': 'default', 'empty': 'None', 'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'partial_parse': 'True', 'quiet': 'False', 'indirect_selection': 'eager', 'version_check': 'True', 'debug': 'False', 'cache_selected_only': 'False', 'use_colors': 'True', 'write_json': 'True', 'printer_width': '80', 'target_path': 'None', 'fail_fast': 'False', 'static_parser': 'True', 'warn_error': 'None', 'send_anonymous_usage_stats': 'True', 'profiles_dir': '/Users/nageswarchowdarypotluri/.dbt', 'introspect': 'True', 'no_print': 'None', 'log_path': 'logs', 'use_experimental_parser': 'False', 'log_cache_events': 'False', 'invocation_command': 'dbt debug'}
+[0m15:01:14.932101 [info ] [MainThread]: dbt version: 1.11.6
+[0m15:01:14.932289 [info ] [MainThread]: python version: 3.11.9
+[0m15:01:14.932436 [info ] [MainThread]: python path: /Users/nageswarchowdarypotluri/my-de-project/dbt-env/bin/python3
+[0m15:01:14.932560 [info ] [MainThread]: os info: macOS-15.5-arm64-arm-64bit
+[0m15:01:15.463426 [debug] [MainThread]: Spark adapter: Setting pyhive.hive logging to ERROR
+[0m15:01:15.463667 [debug] [MainThread]: Spark adapter: Setting thrift.transport logging to ERROR
+[0m15:01:15.463787 [debug] [MainThread]: Spark adapter: Setting thrift.protocol logging to ERROR
+[0m15:06:46.688851 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x1086a2990>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x108803e90>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10882f010>]}
+
+
+============================== 15:06:46.690850 | 54d13028-0890-47ec-b4e5-e36b42a6f36c ==============================
+[0m15:06:46.690850 [info ] [MainThread]: Running with dbt=1.11.6
+[0m15:06:46.691113 [debug] [MainThread]: running dbt with arguments {'log_path': 'logs', 'version_check': 'True', 'profiles_dir': '/Users/nageswarchowdarypotluri/.dbt', 'empty': 'None', 'log_format': 'default', 'static_parser': 'True', 'target_path': 'None', 'write_json': 'True', 'send_anonymous_usage_stats': 'True', 'warn_error': 'None', 'printer_width': '80', 'partial_parse': 'True', 'indirect_selection': 'eager', 'introspect': 'True', 'use_experimental_parser': 'False', 'fail_fast': 'False', 'no_print': 'None', 'use_colors': 'True', 'quiet': 'False', 'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'invocation_command': 'dbt init', 'cache_selected_only': 'False', 'debug': 'False', 'log_cache_events': 'False'}
+[0m15:07:24.107156 [debug] [MainThread]: Starter project path: /Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/include/starter_project
+[0m15:07:24.115745 [info ] [MainThread]: 
+Your new dbt project "POC_Project" was created!
+
+For more information on how to configure the profiles.yml file,
+please consult the dbt documentation here:
+
+  https://docs.getdbt.com/docs/configure-your-profile
+
+One more thing:
+
+Need help? Don't hesitate to reach out to us via GitHub issues or on Slack:
+
+  https://community.getdbt.com/
+
+Happy modeling!
+
+[0m15:07:24.116233 [info ] [MainThread]: Setting up your profile.
+[0m15:07:38.597445 [debug] [MainThread]: Spark adapter: Setting pyhive.hive logging to ERROR
+[0m15:07:38.597681 [debug] [MainThread]: Spark adapter: Setting thrift.transport logging to ERROR
+[0m15:07:38.597820 [debug] [MainThread]: Spark adapter: Setting thrift.protocol logging to ERROR
+[0m15:11:28.196927 [info ] [MainThread]: Profile POC_Project written to /Users/nageswarchowdarypotluri/.dbt/profiles.yml using target's profile_template.yml and your supplied values. Run 'dbt debug' to validate the connection.
+[0m15:11:28.212810 [debug] [MainThread]: Resource report: {"command_name": "init", "command_success": true, "command_wall_clock_time": 281.55222, "process_in_blocks": "0", "process_kernel_time": 0.188297, "process_mem_max_rss": "232718336", "process_out_blocks": "0", "process_user_time": 1.049714}
+[0m15:11:28.213457 [debug] [MainThread]: Command `dbt init` succeeded at 15:11:28.213386 after 281.55 seconds
+[0m15:11:28.213728 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x102812690>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10880d490>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10880c310>]}
+[0m15:11:28.213995 [debug] [MainThread]: Flushing usage events
+[0m15:11:29.505890 [debug] [MainThread]: An error was encountered while trying to flush usage events
+[0m15:11:43.741035 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x1202b1950>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x12029a890>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x12032e710>]}
+
+
+============================== 15:11:43.743038 | 70d3df4e-b939-4229-ab55-3ed9c844ae9d ==============================
+[0m15:11:43.743038 [info ] [MainThread]: Running with dbt=1.11.6
+[0m15:11:43.743303 [debug] [MainThread]: running dbt with arguments {'empty': 'None', 'static_parser': 'True', 'debug': 'False', 'indirect_selection': 'eager', 'log_format': 'default', 'printer_width': '80', 'quiet': 'False', 'version_check': 'True', 'target_path': 'None', 'cache_selected_only': 'False', 'profiles_dir': '/Users/nageswarchowdarypotluri/.dbt', 'log_cache_events': 'False', 'use_colors': 'True', 'use_experimental_parser': 'False', 'invocation_command': 'dbt debug', 'introspect': 'True', 'log_path': 'logs', 'send_anonymous_usage_stats': 'True', 'warn_error': 'None', 'partial_parse': 'True', 'write_json': 'True', 'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'fail_fast': 'False', 'no_print': 'None'}
+[0m15:11:43.749491 [info ] [MainThread]: dbt version: 1.11.6
+[0m15:11:43.749715 [info ] [MainThread]: python version: 3.11.9
+[0m15:11:43.750049 [info ] [MainThread]: python path: /Users/nageswarchowdarypotluri/my-de-project/dbt-env/bin/python3
+[0m15:11:43.750185 [info ] [MainThread]: os info: macOS-15.5-arm64-arm-64bit
+[0m15:11:44.072691 [debug] [MainThread]: Spark adapter: Setting pyhive.hive logging to ERROR
+[0m15:11:44.072921 [debug] [MainThread]: Spark adapter: Setting thrift.transport logging to ERROR
+[0m15:11:44.073044 [debug] [MainThread]: Spark adapter: Setting thrift.protocol logging to ERROR
+[0m15:13:50.347910 [error] [MainThread]: Encountered an error:
+
+[0m15:13:50.362624 [error] [MainThread]: Traceback (most recent call last):
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/urllib3/connection.py", line 204, in _new_conn
+    sock = connection.create_connection(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/urllib3/util/connection.py", line 60, in create_connection
+    for res in socket.getaddrinfo(host, port, family, socket.SOCK_STREAM):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/.pyenv/versions/3.11.9/lib/python3.11/socket.py", line 962, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno 8] nodename nor servname provided, or not known
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/urllib3/connectionpool.py", line 787, in urlopen
+    response = self._make_request(
+               ^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/urllib3/connectionpool.py", line 488, in _make_request
+    raise new_e
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/urllib3/connectionpool.py", line 464, in _make_request
+    self._validate_conn(conn)
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/urllib3/connectionpool.py", line 1093, in _validate_conn
+    conn.connect()
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/urllib3/connection.py", line 759, in connect
+    self.sock = sock = self._new_conn()
+                       ^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/urllib3/connection.py", line 211, in _new_conn
+    raise NameResolutionError(self.host, self, e) from e
+urllib3.exceptions.NameResolutionError: HTTPSConnection(host='a4ed19c9-d332-44ab-8b91-84b2d9ba5077', port=443): Failed to resolve 'a4ed19c9-d332-44ab-8b91-84b2d9ba5077' ([Errno 8] nodename nor servname provided, or not known)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/requests/adapters.py", line 645, in send
+    resp = conn.urlopen(
+           ^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/urllib3/connectionpool.py", line 841, in urlopen
+    retries = retries.increment(
+              ^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/urllib3/util/retry.py", line 535, in increment
+    raise MaxRetryError(_pool, url, reason) from reason  # type: ignore[arg-type]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='a4ed19c9-d332-44ab-8b91-84b2d9ba5077', port=443): Max retries exceeded with url: /oidc/.well-known/oauth-authorization-server (Caused by NameResolutionError("HTTPSConnection(host='a4ed19c9-d332-44ab-8b91-84b2d9ba5077', port=443): Failed to resolve 'a4ed19c9-d332-44ab-8b91-84b2d9ba5077' ([Errno 8] nodename nor servname provided, or not known)"))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/retries.py", line 38, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/_base_client.py", line 286, in _perform
+    response = self._session.request(
+               ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/requests/sessions.py", line 592, in request
+    resp = self.send(prep, **send_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/requests/sessions.py", line 706, in send
+    r = adapter.send(request, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/requests/adapters.py", line 678, in send
+    raise ConnectionError(e, request=request)
+requests.exceptions.ConnectionError: HTTPSConnectionPool(host='a4ed19c9-d332-44ab-8b91-84b2d9ba5077', port=443): Max retries exceeded with url: /oidc/.well-known/oauth-authorization-server (Caused by NameResolutionError("HTTPSConnection(host='a4ed19c9-d332-44ab-8b91-84b2d9ba5077', port=443): Failed to resolve 'a4ed19c9-d332-44ab-8b91-84b2d9ba5077' ([Errno 8] nodename nor servname provided, or not known)"))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/cli/requires.py", line 182, in wrapper
+    result, success = func(*args, **kwargs)
+                      ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/cli/requires.py", line 128, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/cli/main.py", line 420, in debug
+    results = task.run()
+              ^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/task/debug.py", line 114, in run
+    load_profile_status: SubtaskStatus = self._load_profile()
+                                         ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/task/debug.py", line 205, in _load_profile
+    profile: Profile = Profile.render(
+                       ^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/config/profile.py", line 404, in render
+    return cls.from_raw_profiles(
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/config/profile.py", line 370, in from_raw_profiles
+    return cls.from_raw_profile_info(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/config/profile.py", line 326, in from_raw_profile_info
+    credentials: Credentials = cls._credentials_from_profile(
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/config/profile.py", line 153, in _credentials_from_profile
+    credentials = cls.from_dict(data)
+                  ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 105, in __mashumaro_from_dict__
+  File "<string>", line 24, in __init__
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/adapters/databricks/credentials.py", line 133, in __post_init__
+    self._credentials_manager = DatabricksCredentialManager.create_from(self)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/adapters/databricks/credentials.py", line 283, in create_from
+    return DatabricksCredentialManager(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 12, in __init__
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/adapters/databricks/credentials.py", line 344, in __post_init__
+    self._config = self.authenticate_with_external_browser()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/dbt/adapters/databricks/credentials.py", line 310, in authenticate_with_external_browser
+    return Config(
+           ^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/config.py", line 268, in __init__
+    self.init_auth()
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/config.py", line 671, in init_auth
+    self._header_factory = self._credentials_strategy(self)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/credentials_provider.py", line 1145, in __call__
+    header_factory = provider(cfg)
+                     ^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/credentials_provider.py", line 94, in wrapper
+    return func(cfg)
+           ^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/credentials_provider.py", line 261, in external_browser
+    oidc_endpoints = cfg.oidc_endpoints
+                     ^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/config.py", line 486, in oidc_endpoints
+    return get_workspace_endpoints(self.host)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/oauth.py", line 417, in get_workspace_endpoints
+    resp = client.do("GET", oidc)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/_base_client.py", line 199, in do
+    response = call(
+               ^^^^^
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/retries.py", line 65, in wrapper
+    clock.sleep(sleep + random())
+  File "/Users/nageswarchowdarypotluri/my-de-project/dbt-env/lib/python3.11/site-packages/databricks/sdk/clock.py", line 49, in sleep
+    time.sleep(seconds)
+KeyboardInterrupt
+
+[0m15:13:50.367265 [debug] [MainThread]: Resource report: {"command_name": "debug", "command_success": false, "command_wall_clock_time": 126.6486, "process_in_blocks": "0", "process_kernel_time": 0.175825, "process_mem_max_rss": "234602496", "process_out_blocks": "0", "process_user_time": 1.088232}
+[0m15:13:50.367741 [debug] [MainThread]: Command `dbt debug` failed at 15:13:50.367654 after 126.65 seconds
+[0m15:13:50.368110 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x12034b710>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x12034bd50>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x105125c10>]}
+[0m15:13:50.368437 [debug] [MainThread]: Flushing usage events
+[0m15:13:51.633850 [debug] [MainThread]: An error was encountered while trying to flush usage events
+{"data":{"log_version":3,"version":"=2.0.0-preview.173"},"info":{"category":"","code":"A001","extra":{},"invocation_id":"019df18d-4b96-77f0-8bf1-0afc45d61f96","level":"info","msg":"Running with dbt-fusion=2.0.0-preview.173","name":"MainReportVersion","pid":38809,"thread":"tokio-rt-worker","ts":"2026-05-04T05:54:22.233185Z"}}
+{"data":{"args":{"debug":"false","invocation_command":"/Users/nageswarchowdarypotluri/.local/bin/dbt license info --json --log-format json","log_format":"json","quiet":"false","write_json":"true"}},"info":{"category":"","code":"A002","extra":{},"invocation_id":"019df18d-4b96-77f0-8bf1-0afc45d61f96","level":"debug","msg":"running dbt-fusion with argumets {\"command\":\"license\",\"vars\":\"{}\",\"limit\":\"10\",\"debug\":false,\"log_format\":\"json\",\"quiet\":false,\"write_json\":true,\"write_catalog\":false}","name":"MainReportArgs","pid":38809,"thread":"tokio-rt-worker","ts":"2026-05-04T05:54:22.233194Z"}}
+{"data":{},"info":{"category":"","code":"","extra":{},"invocation_id":"019df18d-4b96-77f0-8bf1-0afc45d61f96","level":"debug","msg":"No active cloud project configured, skipping remote license","name":"Generic","pid":38809,"thread":"tokio-rt-worker","ts":"2026-05-04T05:54:22.233829Z"}}
+{"data":{"columns":[],"is_inline":true,"node_name":"license_info","output_format":"json","preview":"{\n  \"status\": \"not_found\",\n  \"licensing_enabled\": true\n}","unique_id":"license.info"},"info":{"category":"","code":"Q041","extra":{},"invocation_id":"019df18d-4b96-77f0-8bf1-0afc45d61f96","level":"info","msg":"{\n  \"status\": \"not_found\",\n  \"licensing_enabled\": true\n}","name":"ShowNode","pid":38809,"thread":"tokio-rt-worker","ts":"2026-05-04T05:54:22.234246Z"}}
+{"data":{"completed_at":"2026-05-04T05:54:22.517268Z","elapsed":0.2842940092086792,"success":true},"info":{"category":"","code":"Q039","extra":{},"invocation_id":"019df18d-4b96-77f0-8bf1-0afc45d61f96","level":"info","msg":"\n==================== Execution Summary =====================\nFinished 'license' successfully [284ms]","name":"CommandCompleted","pid":38809,"thread":"tokio-rt-worker","ts":"2026-05-04T05:54:22.517665Z"}}
