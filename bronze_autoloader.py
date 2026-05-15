@@ -1,6 +1,3 @@
-# ==============================================================================
-# bronze_autoloader.py — FINAL DYNAMIC RECURSIVE VERSION (HIGH-SPEED)
-# ==============================================================================
 import time
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -8,181 +5,325 @@ from collections import defaultdict
 from pyspark.sql import functions as F
 from delta.tables import DeltaTable
 
-# SECTION 1 — SPARK CONFIG
+# ── SECTION 1: SPARK ──────────────────────────────────────────────────────────
 try:
     spark
 except NameError:
     from databricks.connect import DatabricksSession
+
     spark = DatabricksSession.builder.serverless(True).getOrCreate()
 
-# SECTION 2 — STREAM REGISTRY (FULL)
-# ==============================================================================
-BUCKET  = "s3://project-racing-bronze"
+# ── SECTION 2: REGISTRY ───────────────────────────────────────────────────────
+BUCKET = "s3://project-racing-bronze"
 CATALOG = "harness_stream.bronze"
 
 STREAMS = {
     "betfair_catalogue": {
-        "source_path":     f"{BUCKET}/betfair/market_catalogue/",
+        "source_path": f"{BUCKET}/betfair/market_catalogue/",
         "schema_location": f"{BUCKET}/_schema/betfair_catalogue/",
-        "checkpoint":      f"{BUCKET}/_checkpoints/betfair_catalogue/",
-        "target_table":    f"{CATALOG}.betfair_catalogue",
-        "dlo_table":       f"{CATALOG}.dlo_betfair_catalogue",
-        "schema_hints":    "runners STRING, event STRING, eventType STRING",
-        "merge_keys":      ["market_id"],
-        "max_files":       100, # Increased for catch-up
+        "checkpoint": f"{BUCKET}/_checkpoints/betfair_catalogue/",
+        "target_table": f"{CATALOG}.betfair_catalogue",
+        "dlo_table": f"{CATALOG}.dlo_betfair_catalogue",
+        "schema_hints": "runners STRING, event STRING, eventType STRING",
+        "merge_keys": ["market_id"],
+        "max_files": 500,
     },
-
     "betfair_market_book": {
-        "source_path":     f"{BUCKET}/betfair/market_book/",
+        "source_path": f"{BUCKET}/betfair/market_book/",
         "schema_location": f"{BUCKET}/_schema/betfair_market_book/",
-        "checkpoint":      f"{BUCKET}/_checkpoints/betfair_market_book/",
-        "target_table":    f"{CATALOG}.betfair_market_book",
-        "dlo_table":       f"{CATALOG}.dlo_betfair_market_book",
-        "schema_hints":    "runners STRING, betDelayModels STRING",
-        "merge_keys":      ["marketId", "snapshot_type", "run_time"],
-        "max_files":       2000, # Nitro button for catch-up
-    }
+        "checkpoint": f"{BUCKET}/_checkpoints/betfair_market_book/",
+        "target_table": f"{CATALOG}.betfair_market_book",
+        "dlo_table": f"{CATALOG}.dlo_betfair_market_book",
+        "schema_hints": "runners STRING, betDelayModels STRING, api_latency_ms BIGINT, ingested_at STRING",
+        "merge_keys": ["marketId", "snapshot_type", "run_time"],
+        "max_files": 5000,
+    },
 }
 
-# SECTION 3 — UTILS
-def build_stream(source_path, schema_location, schema_hints, max_files):
-    base_hints = "extracted_date STRING, race_code STRING, run_time STRING, snapshot_type STRING"
-    full_hints = f"{base_hints}, {schema_hints}" if schema_hints else base_hints
-    
-    return (spark.readStream
-        .format("cloudFiles")
+
+# ── SECTION 3: STREAM HELPERS ─────────────────────────────────────────────────
+def _base_reader(cfg):
+    base_hints = (
+        "extracted_date STRING, race_code STRING, run_time STRING, snapshot_type STRING"
+    )
+    full_hints = (
+        f"{base_hints}, {cfg['schema_hints']}"
+        if cfg.get("schema_hints")
+        else base_hints
+    )
+    return (
+        spark.readStream.format("cloudFiles")
         .option("cloudFiles.format", "json")
-        .option("cloudFiles.schemaLocation", schema_location)
+        .option("cloudFiles.schemaLocation", cfg["schema_location"])
         .option("cloudFiles.schemaHints", full_hints)
-        .option("cloudFiles.maxFilesPerTrigger", max_files) # Apply dynamic limit
+        .option("cloudFiles.maxFilesPerTrigger", cfg["max_files"])
+        .option("cloudFiles.schemaEvolutionMode", "addNewColumns")
         .option("recursiveFileLookup", "true")
-        .load(source_path)
+        .load(cfg["source_path"])
         .withColumn("_source_file", F.col("_metadata.file_path"))
-        .withColumn("_bronze_loaded_at", F.from_utc_timestamp(F.current_timestamp(), "Australia/Sydney"))
+        .withColumn(
+            "_bronze_loaded_at",
+            F.from_utc_timestamp(F.current_timestamp(), "Australia/Sydney"),
+        )
     )
 
-def make_writer(target_table, dlo_table, merge_keys):
+
+def _make_writer(cfg):
+    merge_keys = cfg["merge_keys"]
+    target_table = cfg["target_table"]
+
     def write_batch(batch_df, batch_id):
+        if batch_df.isEmpty():
+            return
         deduped = batch_df.dropDuplicates(merge_keys)
-        on_condition = " AND ".join([f"target.{k} = source.{k}" for k in merge_keys])
+        condition = " AND ".join(f"t.{k} = s.{k}" for k in merge_keys)
         try:
-            dt = DeltaTable.forName(spark, target_table)
-            dt.alias("target").merge(deduped.alias("source"), on_condition).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
-        except:
-            deduped.write.format("delta").mode("overwrite").partitionBy("extracted_date").saveAsTable(target_table)
+            DeltaTable.forName(spark, target_table).alias("t").merge(
+                deduped.alias("s"), condition
+            ).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
+        except Exception:
+            deduped.write.format("delta").mode("overwrite").partitionBy(
+                "extracted_date"
+            ).saveAsTable(target_table)
+
     return write_batch
 
-# SECTION 4 — THE ENGINE (RECURSIVE DYNAMIC)
-def run_dynamic(today: str = None):
+
+def run_one_shot(cfg):
+    """Load all pending files then stop. Used for catalog refreshes."""
+    (
+        _base_reader(cfg)
+        .writeStream.foreachBatch(_make_writer(cfg))
+        .option("checkpointLocation", cfg["checkpoint"])
+        .trigger(availableNow=True)
+        .start()
+        .awaitTermination()
+    )
+
+
+def start_continuous(cfg):
+    """Start a long-running micro-batch stream. Returns the query handle."""
+    return (
+        _base_reader(cfg)
+        .writeStream.foreachBatch(_make_writer(cfg))
+        .option("checkpointLocation", cfg["checkpoint"])
+        .trigger(processingTime="10 seconds")
+        .start()
+    )
+
+
+# ── SECTION 4: SCHEDULE BUILDER ───────────────────────────────────────────────
+def build_schedule(cat_cfg, today, processed_ids, grace_period):
+    """
+    Read catalog JSON directly from S3 — bypasses Delta for low-latency schedule.
+    Returns (schedule, latest_race_start_utc).
+    schedule = sorted list of (start_dt, trigger_dt, [market_ids])
+    """
     SYDNEY = ZoneInfo("Australia/Sydney")
     TRIGGER_OFFSET = timedelta(minutes=5)
-    GRACE_PERIOD = timedelta(hours=12) 
-    LIVE_POLL_INTERVAL = 5
-    MAX_POLL_MINS = 15
-    
+
+    try:
+        rows = (
+            spark.read.format("json")
+            .option("recursiveFileLookup", "true")
+            .load(cat_cfg["source_path"])
+            .filter(F.col("extracted_date") == today)
+            .select("market_id", "market_start_time")
+            .dropDuplicates(["market_id"])
+            .collect()
+        )
+    except Exception as e:
+        print(f"⚠️  S3 catalog read failed: {e}")
+        return [], None
+
+    now_utc = datetime.now(timezone.utc)
+    groups = defaultdict(list)
+    latest_start = None
+
+    for row in rows:
+        m_id = row["market_id"]
+        start_dt = datetime.fromisoformat(
+            row["market_start_time"].replace("Z", "+00:00")
+        )
+
+        # Always track the latest race start for day-end logic
+        if latest_start is None or start_dt > latest_start:
+            latest_start = start_dt
+
+        # Only schedule markets that haven't been processed yet
+        if m_id not in processed_ids:
+            trigger_dt = start_dt - TRIGGER_OFFSET
+            if trigger_dt > now_utc - grace_period:
+                groups[start_dt].append(m_id)
+
+    schedule = sorted([(t, t - TRIGGER_OFFSET, ids) for t, ids in groups.items()])
+    total_markets = sum(len(ids) for _, _, ids in schedule)
+    last_str = (
+        latest_start.astimezone(SYDNEY).strftime("%H:%M") if latest_start else "none"
+    )
+    print(
+        f"📋 Schedule: {len(schedule)} groups | {total_markets} markets | last race {last_str} AEST"
+    )
+    return schedule, latest_start
+
+
+# ── SECTION 5: ENGINE ─────────────────────────────────────────────────────────
+def run_dynamic(today: str = None):
+    SYDNEY = ZoneInfo("Australia/Sydney")
+
+    GRACE_PERIOD = timedelta(hours=12)
+    DAY_END_BUFFER = timedelta(hours=1)  # suspend this long after last race ends
+    SHORT_BREAK = timedelta(
+        minutes=15
+    )  # skip catalog refresh for gaps shorter than this
+    CAT_REFRESH_BEFORE = timedelta(
+        minutes=10
+    )  # wake up this early before next race to refresh catalog
+    CLOSED_POLL_SECS = 15
+    MAX_POLL = timedelta(minutes=20)
+    EMPTY_WAIT_SECS = 300  # 5 min retry when no races found yet
+
     if today is None:
         today = datetime.now(SYDNEY).strftime("%Y-%m-%d")
 
     cat_cfg = STREAMS["betfair_catalogue"]
     book_cfg = STREAMS["betfair_market_book"]
-    processed_market_ids = set()
+    processed_ids = set()
+    book_query = None
 
-    print(f"🚀 [Dynamic] Monitoring for {today}...")
+    print(f"🚀 AutoLoader starting — {today}")
 
-    while True:
-        print(f"\n--- {datetime.now(SYDNEY).strftime('%H:%M:%S')} | Incremental Catalogue Refresh ---")
-        
-        # ── Step 1: Ingest Catalogue ──
+    # ── Nested helpers that close over mutable state ──────────────────────────
+    def ensure_book_stream():
+        nonlocal book_query
+        if book_query is None or not book_query.isActive:
+            print("▶️  Starting market_book stream (continuous 10s micro-batch)...")
+            book_query = start_continuous(book_cfg)
+
+    def stop_book_stream():
+        nonlocal book_query
+        if book_query and book_query.isActive:
+            book_query.stop()
+            print("⏹️  Market book stream stopped.")
+        book_query = None
+
+    def catalog_refresh():
+        nonlocal schedule, latest_race_start
+        print(
+            "🔄 Catalog refresh — loading new files to Delta + rebuilding schedule..."
+        )
         try:
-            cat_df = build_stream(cat_cfg["source_path"], cat_cfg["schema_location"], cat_cfg["schema_hints"], cat_cfg["max_files"])
-            cat_df.writeStream \
-                .foreachBatch(make_writer(cat_cfg["target_table"], cat_cfg["dlo_table"], cat_cfg["merge_keys"])) \
-                .option("checkpointLocation", cat_cfg["checkpoint"]) \
-                .trigger(availableNow=True) \
-                .start() \
-                .awaitTermination()
+            run_one_shot(cat_cfg)
         except Exception as e:
-            print(f"⚠️ Catalogue Ingestion Error: {e}")
+            print(f"⚠️  Catalog stream error: {e}")
+        schedule, latest_race_start = build_schedule(
+            cat_cfg, today, processed_ids, GRACE_PERIOD
+        )
 
-        # ── Step 2: Build Schedule ──
-        try:
-            markets = (spark.table(cat_cfg["target_table"])
-                       .filter(F.col("extracted_date") == today)
-                       .select("market_id", "market_start_time")
-                       .dropDuplicates(["market_id"])
-                       .collect())
-        except Exception as e:
-            print(f"⚠️ Table not ready. Sleeping 60s...")
-            time.sleep(60); continue
+    # ── Initial load ──────────────────────────────────────────────────────────
+    catalog_refresh()
 
-        now_utc = datetime.now(timezone.utc)
-        groups = defaultdict(list)
-        for row in markets:
-            m_id = row["market_id"]
-            if m_id not in processed_market_ids:
-                start_dt = datetime.fromisoformat(row["market_start_time"].replace("Z", "+00:00"))
-                if (start_dt - TRIGGER_OFFSET) > (now_utc - GRACE_PERIOD):
-                    groups[start_dt].append(m_id)
-
-        schedule = sorted([(t, t - TRIGGER_OFFSET, ids) for t, ids in groups.items()])
-
-        if not schedule:
-            print("💤 All races processed. Waiting 10m for new afternoon/evening files...")
-            time.sleep(600); continue
-
-        # ── Step 3: Process Immediate Race Group ──
-        start_time, trigger_time, market_ids = schedule[0]
-        aest_str = start_time.astimezone(SYDNEY).strftime("%H:%M")
-        
-        is_catchup = (start_time < datetime.now(timezone.utc))
-        wait_secs = (trigger_time - datetime.now(timezone.utc)).total_seconds()
-        
-        if wait_secs > 0:
-            print(f"⏰ Next group: {aest_str} AEST. Waiting {wait_secs/60:.1f} min...")
-            time.sleep(wait_secs)
-
-        # Market Book Polling Loop
-        print(f"🏁 Polling {aest_str} AEST {'(CATCH-UP)' if is_catchup else '(LIVE)'}")
-        poll_start = datetime.now(timezone.utc)
-        
+    # ── Main loop ─────────────────────────────────────────────────────────────
+    try:
         while True:
-            try:
-                # Use higher file limit for catch-up, lower for live
-                batch_limit = book_cfg["max_files"] if is_catchup else 200
-                
-                df = build_stream(book_cfg["source_path"], book_cfg["schema_location"], book_cfg["schema_hints"], batch_limit)
-                df.writeStream \
-                    .foreachBatch(make_writer(book_cfg["target_table"], book_cfg["dlo_table"], book_cfg["merge_keys"])) \
-                    .option("checkpointLocation", book_cfg["checkpoint"]) \
-                    .trigger(availableNow=True) \
-                    .start() \
-                    .awaitTermination()
-                
-                # Verify CLOSED status
-                closed = spark.table(book_cfg["target_table"]) \
-                    .filter(F.col("marketId").isin(market_ids)) \
-                    .filter(F.col("status") == "CLOSED") \
-                    .count()
-                
-                if closed >= len(market_ids):
-                    print(f"✅ All {len(market_ids)} markets CLOSED for {aest_str}")
-                    break
-                
-                if (datetime.now(timezone.utc) - poll_start > timedelta(minutes=MAX_POLL_MINS)):
-                    print(f"⚠️ Max duration reached for {aest_str}. Skipping to next.")
-                    break
-                
-                # Nitro: skip sleep if we are catching up on old data
-                if not is_catchup:
-                    time.sleep(LIVE_POLL_INTERVAL)
-                else:
-                    print(f"⏩ Catch-up in progress: {closed}/{len(market_ids)} closed...")
-                    
-            except Exception as e:
-                print(f"❌ Error: {e}"); time.sleep(LIVE_POLL_INTERVAL)
+            now_utc = datetime.now(timezone.utc)
+            now_syd = datetime.now(SYDNEY)
 
-        for mid in market_ids: processed_market_ids.add(mid)
+            # ── Day-end check ─────────────────────────────────────────────────
+            if not schedule:
+                if latest_race_start and now_utc > latest_race_start + DAY_END_BUFFER:
+                    last_str = latest_race_start.astimezone(SYDNEY).strftime("%H:%M")
+                    print(
+                        f"🏁 Day complete — last race was {last_str} AEST. Suspending."
+                    )
+                    break
+                if not latest_race_start and now_syd.hour >= 21:
+                    print("🏁 No catalog data and past 9PM AEST. Suspending.")
+                    break
+                print(
+                    f"📭 No upcoming races. Rechecking in {EMPTY_WAIT_SECS // 60} min..."
+                )
+                time.sleep(EMPTY_WAIT_SECS)
+                catalog_refresh()
+                continue
 
-# SECTION 5 — ENTRY POINT
+            # ── Next race group ───────────────────────────────────────────────
+            start_time, trigger_time, market_ids = schedule[0]
+            aest_str = start_time.astimezone(SYDNEY).strftime("%H:%M")
+            wait_secs = (trigger_time - now_utc).total_seconds()
+            is_catchup = start_time < now_utc
+
+            # ── Long break: sleep then refresh catalog near race time ─────────
+            if wait_secs > SHORT_BREAK.total_seconds():
+                sleep_target = trigger_time - CAT_REFRESH_BEFORE
+                sleep_secs = (sleep_target - now_utc).total_seconds()
+                if sleep_secs > 0:
+                    print(
+                        f"⏸️  Next race {aest_str} AEST in {wait_secs / 60:.0f} min. "
+                        f"Sleeping {sleep_secs / 60:.0f} min then refreshing catalog..."
+                    )
+                    time.sleep(sleep_secs)
+                catalog_refresh()
+                continue  # re-enter with updated schedule
+
+            # ── Short wait or immediate catch-up ──────────────────────────────
+            if wait_secs > 0:
+                print(f"⏰ {wait_secs:.0f}s until T-5 for {aest_str} AEST...")
+                time.sleep(wait_secs)
+
+            ensure_book_stream()
+            print(
+                f"🏁 Monitoring {aest_str} AEST {'(CATCH-UP)' if is_catchup else '(LIVE)'} "
+                f"— {len(market_ids)} markets"
+            )
+
+            # ── Poll for CLOSED status (live only) ────────────────────────────
+            if not is_catchup:
+                poll_start = datetime.now(timezone.utc)
+                while True:
+                    try:
+                        elapsed = datetime.now(timezone.utc) - poll_start
+                        closed = (
+                            spark.table(book_cfg["target_table"])
+                            .filter(F.col("marketId").isin(market_ids))
+                            .filter(F.col("status") == "CLOSED")
+                            .count()
+                        )
+                        if closed >= len(market_ids) or elapsed > MAX_POLL:
+                            reason = (
+                                "all CLOSED" if closed >= len(market_ids) else "timeout"
+                            )
+                            print(f"✅ {aest_str} AEST done ({reason}).")
+                            break
+                        print(
+                            f"   {closed}/{len(market_ids)} CLOSED — polling in {CLOSED_POLL_SECS}s..."
+                        )
+                        time.sleep(CLOSED_POLL_SECS)
+                    except Exception as e:
+                        print(f"❌ Poll error: {e}")
+                        time.sleep(CLOSED_POLL_SECS)
+            else:
+                print(f"✅ {aest_str} AEST catch-up complete.")
+
+            # ── Mark processed, advance schedule ─────────────────────────────
+            for mid in market_ids:
+                processed_ids.add(mid)
+            schedule = schedule[1:]
+
+            # ── Post-race catalog refresh (only on long next break) ───────────
+            if schedule:
+                next_break_secs = (
+                    schedule[0][1] - datetime.now(timezone.utc)
+                ).total_seconds()
+                if next_break_secs > SHORT_BREAK.total_seconds():
+                    catalog_refresh()
+            else:
+                catalog_refresh()
+
+    finally:
+        stop_book_stream()
+        print("👋 AutoLoader shut down cleanly.")
+
+
 if __name__ == "__main__":
     run_dynamic()
