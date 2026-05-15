@@ -367,6 +367,7 @@ print("\n✅ All harness quality checks passed.")
 
 # COMMAND ----------
 
+# MAGIC %skip
 # MAGIC %sql
 # MAGIC SELECT meeting_id, COUNT(*) AS cnt, COLLECT_LIST(track_slug) AS slugs
 # MAGIC FROM harness_stream.silver.harness_meetings
@@ -376,6 +377,7 @@ print("\n✅ All harness quality checks passed.")
 
 # COMMAND ----------
 
+# MAGIC %skip
 # MAGIC %sql
 # MAGIC -- Example: rename maryborough to MBR to avoid the MAR collision
 # MAGIC UPDATE harness_stream.silver.dim_tracks
@@ -385,6 +387,7 @@ print("\n✅ All harness quality checks passed.")
 
 # COMMAND ----------
 
+# MAGIC %skip
 # MAGIC %sql
 # MAGIC -- MOR collision: mornington vs morphettville
 # MAGIC UPDATE harness_stream.silver.dim_tracks SET track_code = 'MOV' WHERE track_slug = 'morphettville';
@@ -402,6 +405,7 @@ print("\n✅ All harness quality checks passed.")
 
 # COMMAND ----------
 
+# MAGIC %skip
 # MAGIC %sql
 # MAGIC SELECT race_code, COUNT(*) AS cnt, COLLECT_LIST(track_name) AS slugs
 # MAGIC FROM harness_stream.silver.harness_races
@@ -411,6 +415,7 @@ print("\n✅ All harness quality checks passed.")
 
 # COMMAND ----------
 
+# MAGIC %skip
 # MAGIC %sql
 # MAGIC SELECT race_code, horse_number, COUNT(*) AS cnt, COLLECT_LIST(horse_name) AS names
 # MAGIC FROM harness_stream.silver.harness_runners
