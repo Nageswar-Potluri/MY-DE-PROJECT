@@ -95,3 +95,78 @@ Full architecture plan saved at:
 ### 7. Study Guide Reference
 Official: dbt Analytics Engineering Certification Study Guide v1.11
 URL: https://www.getdbt.com/dbt-assets/certifications/dbt-certificate-study-guide-version-1-11
+
+---
+
+## Update — Market Showcase Discussion
+
+### 8. Study Guide Intent Clarified
+The dbt v1.11 study guide was shared as a **feature reference syllabus** — not for exam
+preparation. The goal is to showcase enterprise-level dbt skills to the market
+(employers, clients). Every feature included must serve that purpose.
+
+---
+
+### 9. dbt Mesh — Reinstated (Full Multi-Project Topology)
+Initially excluded because it's on the Architect cert, not the Analytics Engineering cert.
+**Reinstated** because it is the biggest market differentiator in dbt right now.
+Showing a proper Mesh topology signals senior/architect-level thinking.
+
+**Revised project topology:**
+```
+dbt-project/
+├── racing_core/              ← Producer project (harness racing domain)
+│   ├── dbt_project.yml
+│   ├── models/
+│   │   ├── staging/          ← private
+│   │   ├── intermediate/     ← ephemeral, private
+│   │   └── marts/
+│   │       ├── core/         ← public, contracted (dim_tracks, dim_horses, dim_dates)
+│   │       └── racing/       ← public, contracted (fct_races, fct_runner_performance)
+│   └── semantic_models/      ← MetricFlow metrics on racing facts
+│
+└── betting_analytics/        ← Consumer project (Betfair domain)
+    ├── dbt_project.yml
+    ├── dependencies.yml      ← declares racing_core as upstream project
+    ├── models/
+    │   ├── staging/          ← private
+    │   └── marts/
+    │       └── betting/      ← public, contracted (dim_markets, fct_market_prices, fct_price_movements)
+    └── semantic_models/      ← MetricFlow metrics on Betfair facts
+```
+
+Cross-project reference example:
+```sql
+-- inside betting_analytics project
+select * from {{ ref('racing_core', 'fct_races') }}
+```
+
+---
+
+### 10. Full Feature Showcase List (Final)
+
+| Feature | Market Signal | Status |
+|---|---|---|
+| dbt Mesh (multi-project cross-refs) | Senior / Architect level | Include |
+| Semantic Layer / MetricFlow | Enterprise analytics engineering | Include |
+| Microbatch incremental (dbt 1.9+) | Cutting edge | Include |
+| Unit tests (dbt 1.8+) | Modern testing practices | Include |
+| Model contracts | Data governance | Include |
+| Model versions + deprecation | Breaking change management | Include |
+| Custom generic tests | Reusable test patterns | Include |
+| Snapshots in YAML (dbt 1.9+) | Modern SCD Type 2 | Include |
+| dbt clone | CI/CD maturity | Include |
+| State-based selection | Advanced CI | Include |
+| Exposures | Lineage to Power BI | Include |
+| Source freshness | Data reliability | Include |
+| Grants | Security / access control | Include |
+| dbt-utils + dbt-expectations | Package ecosystem knowledge | Include |
+
+---
+
+### 11. What This Showcases to the Market
+1. **Data product thinking** — producer/consumer separation via Mesh
+2. **Multi-team architecture** — not just solo analytics
+3. **Latest dbt features** — Mesh, microbatch, semantic layer
+4. **Engineering rigour** — contracts, versions, unit tests, CI/CD
+5. **Governance mindset** — access controls, grants, model access levels
