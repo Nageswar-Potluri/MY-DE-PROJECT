@@ -1,0 +1,90 @@
+name: racing_analytics
+version: '1.0.0'
+config-version: 2
+
+profile: databricks_racing
+
+model-paths:    ["models"]
+analysis-paths: ["analyses"]
+test-paths:     ["tests"]
+seed-paths:     ["seeds"]
+macro-paths:    ["macros"]
+snapshot-paths: ["snapshots"]
+docs-paths:     ["docs"]
+
+target-path:   "target"
+clean-targets: ["target", "dbt_packages"]
+
+# ── Project variables ────────────────────────────────────────────────────────
+vars:
+  racing_start_date:      '2023-01-01'
+  racing_end_date:        '2030-12-31'
+  betfair_snapshot_types: ['PRE_RACE', 'INPLAY', 'POST_RACE']
+  data_owner:             'Racing Analytics Team'
+
+# ── Model configurations per layer ──────────────────────────────────────────
+models:
+  racing_analytics:
+
+    staging:
+      +materialized: view
+      +schema:       gold_staging
+      +tags:         ['staging']
+      +access:       private
+
+    intermediate:
+      +materialized: ephemeral
+      +tags:         ['intermediate']
+      +access:       private
+
+    marts:
+      +grants:
+        select: ["powerbi_service_principal"]
+
+      core:
+        +materialized: table
+        +schema:       gold_core
+        +tags:         ['core', 'dim']
+        +access:       public
+        +contract:
+          enforced: true
+        +persist_docs:
+          relation: true
+          columns:  true
+
+      racing:
+        +materialized:         incremental
+        +schema:               gold_racing
+        +tags:                 ['racing', 'fact']
+        +access:               public
+        +contract:
+          enforced: true
+        +incremental_strategy: merge
+        +on_schema_change:     sync_all_columns
+        +persist_docs:
+          relation: true
+          columns:  true
+
+      betting:
+        +materialized:         incremental
+        +schema:               gold_betting
+        +tags:                 ['betting', 'fact']
+        +access:               public
+        +contract:
+          enforced: true
+        +on_schema_change:     sync_all_columns
+        +persist_docs:
+          relation: true
+          columns:  true
+
+# ── Snapshot defaults ────────────────────────────────────────────────────────
+snapshots:
+  racing_analytics:
+    +target_schema: gold_snapshots
+    +invalidate_hard_deletes: true
+
+# ── Seed defaults ────────────────────────────────────────────────────────────
+seeds:
+  racing_analytics:
+    +schema:        gold_seeds
+    +quote_columns: false

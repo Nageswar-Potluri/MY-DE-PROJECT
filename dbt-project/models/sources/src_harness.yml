@@ -1,0 +1,112 @@
+version: 2
+
+sources:
+  - name: harness_silver
+    description: >
+      Cleaned and deduplicated harness racing data produced by Silver_Races_Final
+      (Databricks). AU-only, deduped by most-recent _bronze_loaded_at.
+      All timestamps are Australia/Sydney.
+    database: harness_stream
+    schema:    silver
+    loaded_at_field: _silver_loaded_at
+    freshness:
+      warn_after:  { count: 2,  period: hour }
+      error_after: { count: 12, period: hour }
+
+    tables:
+
+      - name: dim_tracks
+        description: >
+          Reference dimension for all Australian racing tracks.
+          track_code is a 3-char uppercase abbreviation derived from track_slug.
+          Unique on track_slug.
+        columns:
+          - name: track_slug
+            description: URL-style slug (e.g. 'albany', 'morphettville').
+            tests: [not_null, unique]
+          - name: track_code
+            description: 3-char uppercase code (e.g. 'ALB', 'MOV').
+            tests: [not_null]
+          - name: track_name
+          - name: state
+          - name: country
+
+      - name: harness_meetings
+        description: >
+          One row per race meeting (track × date).
+          meeting_id format: track_code + ddMMyyyy.
+        freshness:
+          warn_after:  { count: 1, period: hour }
+          error_after: { count: 6, period: hour }
+        columns:
+          - name: meeting_id
+            description: "Surrogate key: track_code || ddMMyyyy."
+            tests: [not_null, unique]
+          - name: track_slug
+            tests: [not_null]
+          - name: meeting_date
+            tests: [not_null]
+          - name: racing_code
+          - name: state
+          - name: country
+            tests:
+              - accepted_values:
+                  values: ['au']
+          - name: meeting_name
+          - name: number_of_races
+          - name: track_condition
+          - name: weather
+
+      - name: harness_races
+        description: >
+          One row per individual race.
+          race_code format: track_code + ddMMyyyy + RR (zero-padded race number).
+          meeting_code (first 11 chars) joins to harness_meetings.meeting_id.
+        columns:
+          - name: race_code
+            tests: [not_null, unique]
+          - name: meeting_code
+            tests: [not_null]
+          - name: race_date
+            tests: [not_null]
+          - name: distance_metres
+          - name: prize_money
+
+      - name: harness_runners
+        description: >
+          One row per runner per race. horse_number = 0 pre-race — use horse_name
+          as the stable identifier. is_scratched = true rows are excluded in staging.
+        columns:
+          - name: race_code
+            tests: [not_null]
+          - name: horse_name
+            tests: [not_null]
+          - name: is_scratched
+
+      - name: harness_runner_stats
+        description: >
+          Performance statistics per runner per race across 7 stat groups:
+          overall | track | distance | trackDistance | condition | firstUp | secondUp.
+          Unique on (race_id, horse_name, stat_group).
+        columns:
+          - name: race_id
+            tests: [not_null]
+          - name: horse_name
+            tests: [not_null]
+          - name: stat_group
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ['overall', 'track', 'distance', 'trackDistance',
+                           'condition', 'firstUp', 'secondUp']
+
+      - name: dim_horse_form
+        description: >
+          Last-20-starts form string exploded to one row per start per horse.
+          result_code maps to finish position or special codes (X=scratched, S=standing start).
+        columns:
+          - name: horse_name
+            tests: [not_null]
+          - name: races_ago
+            tests: [not_null]
+          - name: result_code

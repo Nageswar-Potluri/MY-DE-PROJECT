@@ -1,0 +1,69 @@
+version: 2
+
+sources:
+  - name: betfair_silver
+    description: >
+      Cleaned Betfair exchange data produced by Silver_Betfair_Final (Databricks).
+      AU harness markets only (Pace + Trot). All timestamps are Australia/Sydney.
+    database: harness_stream
+    schema:    silver
+    loaded_at_field: _silver_loaded_at
+    freshness:
+      warn_after:  { count: 30, period: minute }
+      error_after: { count: 2,  period: hour }
+
+    tables:
+
+      - name: betfair_catalogue
+        description: >
+          Market catalogue — one row per runner per Betfair market.
+          runner_name formatted as "N. Horse Name" (barrier . name).
+          race_code links to harness_races when venue + date + race number can be matched.
+        columns:
+          - name: market_id
+            tests: [not_null]
+          - name: selection_id
+            tests: [not_null]
+          - name: runner_name
+            tests: [not_null]
+          - name: event_date
+            tests: [not_null]
+          - name: race_code
+
+      - name: betfair_market_book
+        description: >
+          Market-level snapshots — one row per market per polling timestamp.
+          Unique on (market_id, run_time). snapshot_type derived from status + inplay.
+        columns:
+          - name: market_id
+            tests: [not_null]
+          - name: run_time
+            tests: [not_null]
+          - name: snapshot_type
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ['PRE_RACE', 'INPLAY', 'POST_RACE']
+          - name: status
+          - name: total_matched
+          - name: total_available
+
+      - name: betfair_runner_odds
+        description: >
+          Runner-level price snapshots — one row per runner per poll time.
+          Unique on (market_id, run_time, selection_id).
+          Contains top-of-book back/lay prices and BSP projections.
+        columns:
+          - name: market_id
+            tests: [not_null]
+          - name: selection_id
+            tests: [not_null]
+          - name: run_time
+            tests: [not_null]
+          - name: snapshot_type
+            tests:
+              - accepted_values:
+                  values: ['PRE_RACE', 'INPLAY', 'POST_RACE']
+          - name: best_back_price
+          - name: best_lay_price
+          - name: bsp

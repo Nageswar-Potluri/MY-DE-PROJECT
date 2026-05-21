@@ -1,0 +1,62 @@
+selectors:
+
+  # ── CI selectors ────────────────────────────────────────────────────────────
+
+  - name: ci_fast
+    description: >
+      Lightweight CI check — staging views + unit tests only.
+      No incremental builds. Use for every PR.
+    definition:
+      method: tag
+      value:  staging
+
+  - name: state_modified_plus
+    description: >
+      Slim CI run — only models changed in this PR plus their downstream dependents.
+      Requires --state pointing to prod manifest.json.
+    definition:
+      method: state
+      value:  modified+
+
+  # ── Domain selectors ────────────────────────────────────────────────────────
+
+  - name: core_dims
+    description: "Core dimension tables only."
+    definition:
+      method: tag
+      value:  dim
+
+  - name: racing_domain
+    description: "All racing models and their upstream dependencies."
+    definition:
+      union:
+        - method: tag
+          value: racing
+        - method: tag
+          value: core
+
+  - name: betting_domain
+    description: "All betting models and their upstream dependencies."
+    definition:
+      union:
+        - method: tag
+          value: betting
+        - method: tag
+          value: core
+
+  # ── Operational selectors ───────────────────────────────────────────────────
+
+  - name: daily_refresh
+    description: "All dim and fact models — for the nightly production job."
+    definition:
+      union:
+        - method: tag
+          value: dim
+        - method: tag
+          value: fact
+
+  - name: downstream_of_races
+    description: "fct_races and everything that depends on it — for impact analysis."
+    definition:
+      method: fqn
+      value:  fct_races+
