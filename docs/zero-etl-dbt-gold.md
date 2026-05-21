@@ -170,3 +170,63 @@ select * from {{ ref('racing_core', 'fct_races') }}
 3. **Latest dbt features** — Mesh, microbatch, semantic layer
 4. **Engineering rigour** — contracts, versions, unit tests, CI/CD
 5. **Governance mindset** — access controls, grants, model access levels
+
+---
+
+## Update — Gold Storage Decisions
+
+### 12. Gold Format — CONFIRMED: Apache Iceberg
+Format: **Apache Iceberg** on AWS S3
+
+Rationale:
+- Native Athena v2 support (no manifest tricks)
+- ACID transactions + time travel + schema evolution
+- Readable by both Databricks (Variant 1) and Glue/native (Variant 2)
+- Only format that works cleanly across both architecture variants
+- dbt-athena supports Iceberg materialization natively
+
+**S3 structure:**
+```
+s3://racing-analytics-prod/gold/
+├── racing_core/
+│   ├── dim_tracks/
+│   ├── dim_horses/
+│   ├── dim_dates/
+│   ├── fct_races/
+│   └── fct_runner_performance/
+└── betting_analytics/
+    ├── dim_markets/
+    ├── fct_market_prices/
+    └── fct_price_movements/
+```
+
+**Glue Data Catalog:**
+- Database: `racing_gold`
+- Schema per project: `racing_core` / `betting_analytics`
+
+**dbt config:**
+```yaml
+# dbt_project.yml
+models:
+  betting_analytics:
+    marts:
+      +file_format:    iceberg
+      +table_type:     iceberg
+      +partitioned_by: ['event_date']   # fct_market_prices + fct_price_movements
+```
+
+**profiles.yml (prod target):**
+```yaml
+prod:
+  type:           athena
+  s3_staging_dir: s3://racing-analytics-prod/athena-staging/
+  s3_data_dir:    s3://racing-analytics-prod/gold/
+  database:       racing_gold
+  schema:         betting_analytics
+  region_name:    ap-southeast-2
+```
+
+### 13. Open Questions (remaining)
+- [ ] S3 bucket name — existing bucket or new one?
+- [ ] AWS region confirmed as ap-southeast-2 (Sydney)?
+- [ ] Power BI connection method — Athena ODBC or S3 direct connector?
